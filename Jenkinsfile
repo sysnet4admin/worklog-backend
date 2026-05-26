@@ -60,8 +60,8 @@ pipeline {
                     git remote set-url origin https://${GITHUB_CREDENTIALS_USR}:${GITHUB_CREDENTIALS_PSW}@github.com/sysnet4admin/worklog-backend.git
                     git add deploy_manifest/
                     git diff --staged --quiet || git commit -m "deploy: update image tag to ${SHORT_SHA} for ${TARGET_ENV}"
-                    git pull --rebase origin HEAD:main || true
-                    git push origin HEAD:main
+                    git pull --rebase origin ${BRANCH_NAME} || true
+                    git push origin HEAD:${BRANCH_NAME}
                 """
             }
         }
