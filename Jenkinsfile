@@ -27,7 +27,6 @@ pipeline {
             }
         }
         stage('Test') {
-            agent any
             steps {
                 sh '''
                     curl -LsSf https://astral.sh/uv/install.sh | sh
