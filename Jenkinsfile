@@ -6,7 +6,7 @@ def targetEnvironment
 def targetNamespace
 def imageTag
 
-def determineEnvironment() {
+def determineEnvironment(sha) {
     if (env.TAG_NAME && env.TAG_NAME.startsWith('v')) {
         targetEnvironment = 'prod'
         targetNamespace = 'prod'
@@ -14,19 +14,19 @@ def determineEnvironment() {
     } else if (env.BRANCH_NAME == 'develop') {
         targetEnvironment = 'dev'
         targetNamespace = 'dev'
-        imageTag = "dev-${shortSHA}"
+        imageTag = "dev-${sha}"
     } else if (env.BRANCH_NAME.startsWith('release/')) {
         targetEnvironment = 'staging'
         targetNamespace = 'staging'
-        imageTag = "staging-${shortSHA}"
+        imageTag = "staging-${sha}"
     } else if (env.BRANCH_NAME == 'main') {
         targetEnvironment = 'dev'
         targetNamespace = 'dev'
-        imageTag = "dev-${shortSHA}"
+        imageTag = "dev-${sha}"
     } else {
         targetEnvironment = 'dev'
         targetNamespace = 'dev'
-        imageTag = "dev-${shortSHA}"
+        imageTag = "dev-${sha}"
     }
 }
 
@@ -55,7 +55,7 @@ pipeline {
                     shortSHA = fullSHA[0..7]
                     branch = env.BRANCH_NAME
                     commitMessage = sh(script: "git log -1 --format='*%s* by _%an_'", returnStdout: true).trim()
-                    determineEnvironment()
+                    determineEnvironment(shortSHA)
                     echo "Target Environment: ${targetEnvironment}"
                     echo "Target Namespace: ${targetNamespace}"
                     echo "Image Tag: ${imageTag}"
