@@ -76,6 +76,7 @@ pipeline {
                     curl -sSL -o /tmp/argocd https://github.com/argoproj/argo-cd/releases/download/v3.4.2/argocd-linux-arm64
                     chmod +x /tmp/argocd
                     /tmp/argocd login 10.110.218.22 --username admin --password ${ARGOCD_ADMIN_PASSWORD_PSW} --insecure --plaintext
+                    chmod 600 ~/.config/argocd/config 2>/dev/null || true
                     /tmp/argocd app sync ${ARGOCD_APP}
                     /tmp/argocd app wait ${ARGOCD_APP} --health --timeout 120
                 """
