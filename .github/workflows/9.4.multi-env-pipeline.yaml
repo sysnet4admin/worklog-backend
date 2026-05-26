@@ -101,8 +101,9 @@ jobs:
           git config user.email "github-actions@github.com"
           git add deploy_manifest/
           git diff --staged --quiet || git commit -m "deploy: update image tag to ${IMAGE_TAG} for ${NAMESPACE}"
-          git pull --rebase origin HEAD
-          git push origin HEAD
+          BRANCH=$(echo "${GITHUB_REF#refs/heads/}" | grep -v "^$" || echo "${GITHUB_HEAD_REF}")
+          git pull --rebase origin ${BRANCH}
+          git push origin HEAD:${BRANCH}
 
   notify-success-result:
     if: ${{ success() }}
