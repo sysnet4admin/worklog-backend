@@ -75,8 +75,8 @@ pipeline {
                 sh """
                     curl -sSL -o /tmp/argocd https://github.com/argoproj/argo-cd/releases/download/v3.4.2/argocd-linux-arm64
                     chmod +x /tmp/argocd
-                    mkdir -p ~/.config/argocd && touch ~/.config/argocd/config && chmod 600 ~/.config/argocd/config
-                    /tmp/argocd login 10.110.218.22 --username admin --password ${ARGOCD_ADMIN_PASSWORD_PSW} --insecure --plaintext
+                    mkdir -p ~/.config/argocd
+                    umask 0177 && /tmp/argocd login 10.110.218.22 --username admin --password ${ARGOCD_ADMIN_PASSWORD_PSW} --insecure --plaintext
                     /tmp/argocd app sync ${ARGOCD_APP}
                     /tmp/argocd app wait ${ARGOCD_APP} --health --timeout 120
                 """
