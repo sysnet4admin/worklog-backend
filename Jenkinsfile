@@ -4,8 +4,6 @@ pipeline {
         DOCKER_REPOSITORY = 'sysnet4admin/worklog-backend'
         DOCKERHUB_CREDENTIALS = credentials('dockerhub-credentials')
         GITHUB_CREDENTIALS = credentials('github-token')
-        ARGOCD_SERVER = 'argocd-server.argocd.svc.cluster.local'
-        ARGOCD_ADMIN_PASSWORD = credentials('argocd-admin-password')
     }
     stages {
         stage('Init') {
@@ -70,22 +68,9 @@ pipeline {
                 }
             }
         }
-        stage('Sync Argo CD') {
-            steps {
-                sh """
-                    curl -sSL -o /tmp/argocd https://github.com/argoproj/argo-cd/releases/download/v3.4.2/argocd-linux-arm64
-                    chmod +x /tmp/argocd
-                    /tmp/argocd login 10.110.218.22 --username admin --password ${ARGOCD_ADMIN_PASSWORD_PSW} --insecure --plaintext || true
-                    chmod 600 ~/.config/argocd/config 2>/dev/null || true
-                    /tmp/argocd login 10.110.218.22 --username admin --password ${ARGOCD_ADMIN_PASSWORD_PSW} --insecure --plaintext
-                    /tmp/argocd app sync ${ARGOCD_APP}
-                    /tmp/argocd app wait ${ARGOCD_APP} --health --timeout 120
-                """
-            }
-        }
     }
     post {
-        success { echo "Argo CD deploy to ${env.TARGET_ENV} succeeded" }
-        failure { echo "Argo CD deploy to ${env.TARGET_ENV} failed" }
+        success { echo "Deploy to ${env.TARGET_ENV} (${env.ARGOCD_APP}) — Argo CD automated sync will pick up the manifest change" }
+        failure { echo "Pipeline failed for ${env.TARGET_ENV}" }
     }
 }
