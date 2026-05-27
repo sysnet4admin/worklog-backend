@@ -1,5 +1,5 @@
 [extend]
 useDefault = true
 
-[[rules.allowlist]]
-paths = ["*.md", "tests/", "deploy_manifest/"]
+[allowlist]
+paths = [".*\\.md$", "tests/", "deploy_manifest/"]
