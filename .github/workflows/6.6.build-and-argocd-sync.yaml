@@ -82,6 +82,7 @@ jobs:
           git config user.email "github-actions@github.com"
           git add .
           git commit -m "deploy: update image tag to ${{ needs.init-and-test.outputs.short_sha }}"
+          git pull --rebase origin main
           git push origin main
 
   notify-success-result:
