@@ -105,3 +105,4 @@ $ poetry run black .
 ```bash
 $ poetry run isort --profile black .
 ```
+# verification Thu May 28 10:07:02 KST 2026
