@@ -5,6 +5,8 @@ RUN uv export --no-dev --no-hashes --no-emit-project -o requirements.txt
 
 FROM python:3.12-slim-bookworm
 
+RUN apt-get update && apt-get upgrade -y && rm -rf /var/lib/apt/lists/*
+
 WORKDIR /app/worklog
 COPY ./src/worklog /app/worklog
 COPY --from=uv_builder /requirements.txt /tmp/requirements.txt
