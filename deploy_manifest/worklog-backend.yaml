@@ -25,14 +25,14 @@ spec:
       - name: dockerhub-creds
       containers:
       - name: worklog-backend
-        image: sysnet4admin/worklog-backend:ec3defcb
+        image: sysnet4admin/worklog-backend:15eebb34
         ports:
         - containerPort: 80
         env:
         - name: MONGO_HOST
           value: worklog-mongodb.default.svc.cluster.local
         - name: IMAGE_TAG
-          value: ec3defcb # IMAGE_TAG
+          value: 15eebb34 # IMAGE_TAG
         - name: MONGO_INITDB_ROOT_USERNAME
           valueFrom:
             secretKeyRef:
