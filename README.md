@@ -106,3 +106,4 @@ $ poetry run black .
 $ poetry run isort --profile black .
 ```
 # verification Thu May 28 10:07:02 KST 2026
+# ch6.6 verification Thu May 28 14:29:43 KST 2026
