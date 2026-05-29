@@ -53,7 +53,7 @@ pipeline {
                     docker buildx rm backend-builder 2>/dev/null || true
                     docker buildx create --name backend-builder --driver docker-container --use
                     echo ${DOCKERHUB_CREDENTIALS_PSW} | docker login --username ${DOCKERHUB_CREDENTIALS_USR} --password-stdin
-                    docker buildx build --platform linux/amd64 \\
+                    docker buildx build --platform linux/arm64 \\
                         -t ${DOCKER_REPOSITORY}:${IMAGE_TAG} \\
                         -t ${DOCKER_REPOSITORY}:${SHORT_SHA} \\
                         --push .
