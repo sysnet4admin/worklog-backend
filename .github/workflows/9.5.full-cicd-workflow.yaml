@@ -122,7 +122,7 @@ jobs:
           git config user.email "github-actions@github.com"
           git add .
           git diff --staged --quiet || git commit -m "deploy: update image tag to ${IMAGE_TAG} for ${NAMESPACE}"
-          BRANCH=$(echo "${GITHUB_REF#refs/heads/}"); git pull --rebase origin ${BRANCH}
+          BRANCH=$(echo "${GITHUB_REF#refs/heads/}"); git pull --rebase -X theirs origin ${BRANCH}
           git push origin HEAD:${BRANCH}
 
   notify-success-result:

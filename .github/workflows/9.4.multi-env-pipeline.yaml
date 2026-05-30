@@ -102,7 +102,7 @@ jobs:
           git add deploy_manifest/
           git diff --staged --quiet || git commit -m "deploy: update image tag to ${IMAGE_TAG} for ${NAMESPACE}"
           BRANCH=$(echo "${GITHUB_REF#refs/heads/}" | grep -v "^$" || echo "${GITHUB_HEAD_REF}")
-          git pull --rebase origin ${BRANCH}
+          git pull --rebase -X theirs origin ${BRANCH}
           git push origin HEAD:${BRANCH}
 
   notify-success-result:
