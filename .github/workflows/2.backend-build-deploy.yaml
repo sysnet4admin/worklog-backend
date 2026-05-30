@@ -62,5 +62,5 @@ jobs:
           git config user.email "github-actions@github.com"
           git add deploy_manifest/
           git commit -m "deploy: update backend image tag to ${{ needs.build.outputs.short_sha }}"
-          git pull --rebase origin main
+          git pull --rebase -X theirs origin main
           git push origin main
