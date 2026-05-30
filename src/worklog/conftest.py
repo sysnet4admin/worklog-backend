@@ -5,5 +5,6 @@ from worklog.main import app
 
 
 @pytest.fixture()
-def test_client() -> AsyncClient:
-    return AsyncClient(transport=ASGITransport(app=app), base_url="http://test", follow_redirects=True)
+async def test_client() -> AsyncClient:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test", follow_redirects=True) as client:
+        yield client
