@@ -110,3 +110,5 @@ $ poetry run isort --profile black .
 <!-- run-06 ch9 quality/security gates verify: 20260531-085502 -->
 
 <!-- run-07 ch8/ch9 verify: 20260531-123249 -->
+
+<!-- run-07 ch8.5 단독: 123754 -->
