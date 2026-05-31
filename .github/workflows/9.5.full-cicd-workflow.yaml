@@ -132,7 +132,7 @@ jobs:
           else
             BRANCH="${{ github.ref_name }}"
           fi
-          git pull --rebase origin ${BRANCH}
+          git pull --rebase -X theirs origin ${BRANCH}
           git push origin HEAD:${BRANCH}
 
   notify-success-result:
