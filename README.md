@@ -113,3 +113,5 @@ $ poetry run isort --profile black .
 <!-- run-06 ch6.6 verify: 20260531-074546 -->
 
 <!-- run-07 ch5 build-deploy verify: 20260531-104845 -->
+
+<!-- run-08 ch5/6.6: 145058 -->
