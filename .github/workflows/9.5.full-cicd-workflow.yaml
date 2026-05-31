@@ -1,4 +1,7 @@
 name: Full CI/CD Workflow (Argo CD)
+concurrency:
+  group: worklog-backend-deploy-${{ github.ref }}
+  cancel-in-progress: false
 
 on:
   pull_request:

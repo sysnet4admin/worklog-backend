@@ -1,4 +1,7 @@
 name: Multi-Environment Deploy
+concurrency:
+  group: worklog-backend-deploy-${{ github.ref }}
+  cancel-in-progress: false
 
 on:
   pull_request:

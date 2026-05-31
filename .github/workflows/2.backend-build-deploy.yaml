@@ -1,4 +1,7 @@
 name: Backend Build and Deploy
+concurrency:
+  group: worklog-backend-deploy-${{ github.ref }}
+  cancel-in-progress: false
 
 on:
   push:
