@@ -116,3 +116,4 @@ $ poetry run isort --profile black .
 
 <!-- run-08 ch5/6.6: 145058 -->
 # run-09 ch4.4 verify
+# run-09 ch5.2 verify
