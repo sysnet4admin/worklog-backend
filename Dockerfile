@@ -1,9 +1,9 @@
-FROM ghcr.io/astral-sh/uv:python3.12-bookworm-slim AS uv_builder
+FROM ghcr.io/astral-sh/uv:python3.14-bookworm-slim AS uv_builder
 
 COPY ./pyproject.toml ./uv.lock /
 RUN uv export --no-dev --no-hashes --no-emit-project -o requirements.txt
 
-FROM python:3.12.3-slim-bookworm
+FROM python:3.14-slim-bookworm
 
 WORKDIR /app/worklog
 COPY ./src/worklog /app/worklog
