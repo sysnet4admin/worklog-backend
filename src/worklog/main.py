@@ -1,3 +1,4 @@
+import os  # F401 unused (ch9.3 lint test)
 from fastapi import FastAPI
 
 from worklog.routers.health import health
