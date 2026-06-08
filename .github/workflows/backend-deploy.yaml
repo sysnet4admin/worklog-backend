@@ -1,0 +1,66 @@
+name: Backend Build and Deploy
+concurrency:
+  group: worklog-deploy-${{ github.ref }}
+  cancel-in-progress: false
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - 'deploy_manifest/**'
+
+permissions:
+  contents: write
+
+env:
+  IMAGE_NAME: worklog-backend
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install uv
+        run: curl -LsSf https://astral.sh/uv/install.sh | sh
+      - name: Run tests
+        run: |
+          export PATH="$HOME/.local/bin:$PATH"
+          uv sync --extra dev
+          TESTING=true uv run coverage run --source ./src/worklog -m pytest --disable-warnings -v
+          uv run coverage report
+
+  build:
+    needs: test
+    runs-on: ubuntu-latest
+    outputs:
+      image_tag: ${{ steps.vars.outputs.image_tag }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set image tag
+        id: vars
+        run: echo "image_tag=$(git rev-parse --short=8 HEAD)" >> $GITHUB_OUTPUT
+      - name: Docker login
+        run: echo "${{ secrets.DOCKERHUB_TOKEN }}" | docker login -u "${{ secrets.DOCKERHUB_USERNAME }}" --password-stdin
+      - name: Build and push (multi-arch)
+        run: |
+          docker run --privileged --rm tonistiigi/binfmt --install all
+          docker buildx create --use --name builder
+          docker buildx build --platform linux/amd64,linux/arm64 \
+            -t ${{ secrets.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}:${{ steps.vars.outputs.image_tag }} \
+            --push .
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Update manifest and push
+        run: |
+          sed -i "s|image: .*/worklog-backend:.*|image: ${{ secrets.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}:${{ needs.build.outputs.image_tag }}|" deploy_manifest/worklog-backend.yaml
+          sed -i "s|value: .* # IMAGE_TAG|value: ${{ needs.build.outputs.image_tag }} # IMAGE_TAG|" deploy_manifest/worklog-backend.yaml
+          git config user.name "github-actions"
+          git config user.email "actions@github.com"
+          git add deploy_manifest/
+          git diff --staged --quiet || git commit -m "deploy: update backend image to ${{ needs.build.outputs.image_tag }}"
+          git pull --rebase -X theirs origin main
+          git push origin main
