@@ -23,14 +23,14 @@ spec:
     spec:
       containers:
       - name: worklog-backend
-        image: sysnet4admin/worklog-backend:dev-da7815d7
+        image: sysnet4admin/worklog-backend:v1.0.0
         ports:
         - containerPort: 80
         env:
         - name: MONGO_HOST
           value: worklog-mongodb.default.svc.cluster.local
         - name: IMAGE_TAG
-          value: dev-da7815d7 # IMAGE_TAG
+          value: v1.0.0 # IMAGE_TAG
         - name: MONGO_INITDB_ROOT_USERNAME
           valueFrom:
             secretKeyRef:
