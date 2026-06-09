@@ -1,3 +1,4 @@
+import os  # unused F401
 from fastapi import FastAPI
 
 from worklog.routers.health import health
