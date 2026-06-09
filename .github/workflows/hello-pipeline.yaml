@@ -1,0 +1,31 @@
+name: My First Pipeline
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run test
+        run: |
+          echo "let's run a test"
+  build:
+    runs-on: ubuntu-latest
+    needs: ["test"]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build image
+        run: |
+          echo "Let's build the image"
+  deploy:
+    runs-on: ubuntu-latest
+    needs: ["test", "build"]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Deploy image
+        run: |
+          echo "Let's deploy the image"
