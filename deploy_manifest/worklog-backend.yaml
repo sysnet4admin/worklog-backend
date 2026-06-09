@@ -16,7 +16,7 @@ spec:
         - name: dockerhub-creds
       containers:
         - name: worklog-backend
-          image: sysnet4admin/worklog-backend:dev-9a833004
+          image: sysnet4admin/worklog-backend:buildtest1
           ports:
             - containerPort: 80
           env:
