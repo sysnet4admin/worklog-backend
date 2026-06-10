@@ -107,3 +107,4 @@ $ poetry run isort --profile black .
 ```
 ch7.8 backend trigger 1780745905
 # ch6.7 1781051780
+# 1781053249
