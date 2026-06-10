@@ -13,3 +13,7 @@ class Settings(BaseSettings):
 
 
 settings = Settings()
+
+# ch9.4 테스트용 가짜 시크릿 [run-28]
+AWS_SECRET_ACCESS_KEY = "wJalrXUtnFEMI/K7MDENG/bPxRfiCYzzzRUN28KEY"
+AWS_ACCESS_KEY_ID = "AKIAIOSFODNN7RUN28ZZ"
