@@ -6,8 +6,8 @@ on:
       - main
 
 env:
-  DOCKER_REPOSITORY: <dockerhub_username>/worklog-backend
-  DOCKERHUB_USERNAME: <dockerhub_username>
+  DOCKER_REPOSITORY: sysnet4admin/worklog-backend
+  DOCKERHUB_USERNAME: sysnet4admin
   DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
 
 jobs:
