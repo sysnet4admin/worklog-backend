@@ -30,5 +30,3 @@ app.include_router(
     prefix="/api/v1/todos",
     tags=["todos"],
 )
-
-import os  # unused [run-27]
