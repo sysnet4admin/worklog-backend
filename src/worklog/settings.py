@@ -13,6 +13,3 @@ class Settings(BaseSettings):
 
 
 settings = Settings()
-
-AWS_SECRET_ACCESS_KEY = "wJalrXUtnFEMI/K7MDENG/bPxRfiCYzzzRUN32KEY"
-AWS_ACCESS_KEY_ID = "AKIAIOSFODNN7RUN32ZZ"
