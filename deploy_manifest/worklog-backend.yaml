@@ -1,78 +1,58 @@
----
-apiVersion: v1
-kind: Secret
-metadata:
-  name: worklog-mongodb-creds
-data:
-  username: cm9vdA==          # root
-  password: bXlwYXNzdzByZA==  # mypassw0rd
----
 apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: worklog-backend
 spec:
+  replicas: 2
   selector:
     matchLabels:
       app: worklog-backend
-  replicas: 1
   template:
     metadata:
       labels:
         app: worklog-backend
     spec:
+      imagePullSecrets:
+        - name: dockerhub-creds
       containers:
-      - name: worklog-backend
-        image: sysnet4admin/worklog-backend:63be926d
-        ports:
-        - containerPort: 80
-        env:
-        - name: MONGO_HOST
-          value: worklog-mongodb.default.svc.cluster.local
-        - name: IMAGE_TAG
-          value: 63be926d # IMAGE_TAG
-        - name: MONGO_INITDB_ROOT_USERNAME
-          valueFrom:
-            secretKeyRef:
-              name: worklog-mongodb-creds
-              key: username
-        - name: MONGO_INITDB_ROOT_PASSWORD
-          valueFrom:
-            secretKeyRef:
-              name: worklog-mongodb-creds
-              key: password
-        livenessProbe:
-          httpGet:
-            path: /health
-            port: 80
-          initialDelaySeconds: 10
-          periodSeconds: 10
-          timeoutSeconds: 5
-          successThreshold: 1
-          failureThreshold: 6
-        readinessProbe:
-          httpGet:
-            path: /health
-            port: 80
-          initialDelaySeconds: 5
-          periodSeconds: 10
-          timeoutSeconds: 5
-          successThreshold: 1
-          failureThreshold: 3
+        - name: worklog-backend
+          image: sysnet4admin/worklog-backend:buildtest1
+          ports:
+            - containerPort: 80
+          env:
+            - name: MONGO_HOST
+              value: worklog-mongodb.default.svc.cluster.local
+            - name: IMAGE_TAG
+              value: "buildtest1" # IMAGE_TAG
+            - name: MONGO_INITDB_ROOT_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: worklog-mongodb-creds
+                  key: username
+            - name: MONGO_INITDB_ROOT_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: worklog-mongodb-creds
+                  key: password
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 80
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 80
 ---
 apiVersion: v1
 kind: Service
 metadata:
   name: worklog-backend
-  labels:
-    app: worklog-backend
 spec:
-  ports:
-    - name: http
-      port: 80
   selector:
     app: worklog-backend
-  type: ClusterIP
+  ports:
+    - port: 80
+      targetPort: 80
 ---
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute
@@ -80,14 +60,14 @@ metadata:
   name: worklog-backend
 spec:
   parentRefs:
-  - name: nginx-gateway
+    - name: nginx-gateway
   hostnames:
-  - worklog-backend.myk8s.local
+    - worklog-backend.myk8s.local
   rules:
-  - matches:
-    - path:
-        type: PathPrefix
-        value: /
-    backendRefs:
-    - name: worklog-backend
-      port: 80
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /
+      backendRefs:
+        - name: worklog-backend
+          port: 80
