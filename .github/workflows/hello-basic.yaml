@@ -1,0 +1,19 @@
+name: My First Actions
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  my-first-job:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Say Hello Github Actions
+        run: echo "Hello Github Actions!"
+
+      - name: This is my repository
+        run: ls -l
