@@ -1,41 +1,31 @@
-name: My First Actions
+name: My First Pipeline
 
 on:
   push:
     branches:
       - main
 
-env:
-  MY_NAME: Cute Octocat
-
 jobs:
-  my-first-job:
+  test:
     runs-on: ubuntu-latest
-
     steps:
       - uses: actions/checkout@v4
-
-      - name: Say Hello Github Actions
-        run: echo "Hello Github Actions!"
-      - run: echo "🎉 The job was automatically triggered by a ${{ github.event_name }} event."
-      - run: echo "🐧 This job is now running on a ${{ runner.os }} server hosted by GitHub!"
-      - run: echo "🔎 The name of your branch is ${{ github.ref }} and your repository is ${{ github.repository }}."
-      - name: Check out repository code
-        uses: actions/checkout@v4
-      - run: |
-          echo "💡 The ${{ github.repository }} repository has been cloned to the runner."
-          echo " The current branch ref is ${GITHUB_REF}"
-      - run: echo "🖥️ The workflow is now ready to test your code on the runner."
-      - name: List files in the repository
+      - name: Run test
         run: |
-          echo "files in the workspace root"
-          ls ${{ github.workspace }}
-          echo "workspace structure"
-          tree ${{ github.workspace }}
-      - name: Inject environment variable
-        run: echo "My name is ${MY_NAME}, and this name is from my global environment variable"
-      - name: use global environment variable
-        env:
-          WHAT_I_LOVE: learning CI/CD with Github Actions
-        run: echo "I love ${WHAT_I_LOVE}!, and this is from step environment variable!"
-      - run: echo "🍏 This job's status is ${{ job.status }}."
+          echo "let's run a test"
+  build:
+    runs-on: ubuntu-latest
+    needs: ["test"]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build image
+        run: |
+          echo "Let's build the image"
+  deploy:
+    runs-on: ubuntu-latest
+    needs: ["test", "build"]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Deploy image
+        run: |
+          echo "Let's deploy the image"
