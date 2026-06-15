@@ -45,6 +45,15 @@ pipeline {
                 '''
             }
         }
+        stage('Security Scan') {
+            steps {
+                sh '''
+                    export PATH="$HOME/.local/bin:$PATH"
+                    uv sync --extra dev
+                    uvx pip-audit
+                '''
+            }
+        }
         stage('Test') {
             steps {
                 sh '''
