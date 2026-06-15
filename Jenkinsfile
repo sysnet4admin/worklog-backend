@@ -60,7 +60,7 @@ pipeline {
                     export PATH="$HOME/.local/bin:$PATH"
                     uv sync --extra dev
                     TESTING=true uv run coverage run --source ./src/worklog -m pytest --disable-warnings -v
-                    uv run coverage report
+                    uv run coverage report --fail-under=80
                 '''
             }
         }
