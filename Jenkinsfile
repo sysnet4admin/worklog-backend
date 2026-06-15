@@ -35,10 +35,19 @@ pipeline {
                 }
             }
         }
-        stage('Test') {
+        stage('Lint') {
             steps {
                 sh '''
                     curl -LsSf https://astral.sh/uv/install.sh | sh
+                    export PATH="$HOME/.local/bin:$PATH"
+                    uv sync --extra dev
+                    uv run ruff check src/
+                '''
+            }
+        }
+        stage('Test') {
+            steps {
+                sh '''
                     export PATH="$HOME/.local/bin:$PATH"
                     uv sync --extra dev
                     TESTING=true uv run coverage run --source ./src/worklog -m pytest --disable-warnings -v
