@@ -67,14 +67,15 @@ pipeline {
                     def branch = env.BRANCH_NAME
                     sh """
                         git rebase --abort 2>/dev/null || true
-                        sed -i "s|image: .*worklog-backend:.*|image: ${DOCKER_REPOSITORY}:${imageTag}|" deploy_manifest/worklog-backend.yaml
-                        sed -i "s|value: .* # IMAGE_TAG|value: \\\"${imageTag}\\\" # IMAGE_TAG|" deploy_manifest/worklog-backend.yaml
                         git config user.name "jenkins"
                         git config user.email "jenkins@myk8s.local"
                         git remote set-url origin "https://\$GITHUB_CREDENTIALS_USR:\$GITHUB_CREDENTIALS_PSW@github.com/${GITHUB_CREDENTIALS_USR}/worklog-backend.git"
+                        git fetch origin ${branch}
+                        git reset --hard origin/${branch}
+                        sed -i "s|image: .*worklog-backend:.*|image: ${DOCKER_REPOSITORY}:${imageTag}|" deploy_manifest/worklog-backend.yaml
+                        sed -i "s|value: .* # IMAGE_TAG|value: \\\"${imageTag}\\\" # IMAGE_TAG|" deploy_manifest/worklog-backend.yaml
                         git add deploy_manifest/
                         git diff --staged --quiet || git commit -m "deploy: update image tag to ${imageTag} for ${targetEnv}"
-                        git pull --rebase origin ${branch} || git rebase --abort
                         git push origin HEAD:${branch}
                     """
                 }
