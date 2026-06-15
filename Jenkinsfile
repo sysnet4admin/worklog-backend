@@ -11,8 +11,12 @@ def sendSlackMessage(statusMessage, commitMessage, shortSHA, fullSHA) {
 
 pipeline {
     // 컨트롤러에는 docker가 없으므로 docker.sock을 가진 k8s 에이전트(JCasC kubernetes cloud)에서 실행.
-    // label은 ch4.5 jenkins-config.yaml의 podTemplate label과 일치해야 함.
+    // docker.build()/withRegistry()가 동작하려면 이 에이전트가 필수. label은 ch4.5 jenkins-config.yaml과 일치.
     agent { label 'jenkins-jenkins-agent' }
+    environment {
+        DOCKER_REPOSITORY = 'sysnet4admin/worklog-backend'
+        DOCKERHUB_CREDENTIALS = credentials('dockerhub-credentials')
+    }
     stages {
         stage('Init Variables') {
             steps {
@@ -25,8 +29,7 @@ pipeline {
             }
         }
         stage('Run Test') {
-            // 에이전트 pod에 uv를 직접 설치해 실행(중첩 docker agent 대신).
-            // 중첩 docker agent는 에이전트 안에서 또 docker run을 띄워야 해 환경에 따라 불안정.
+            // 에이전트 pod에 uv를 직접 설치해 실행(중첩 docker agent 대신 — 환경에 따라 불안정).
             steps {
                 echo "let's run a test for ${shortSHA} in ${branch}"
                 echo "running test for ${fullSHA}"
@@ -38,12 +41,22 @@ pipeline {
                 echo 'Test Passed!'
             }
         }
-        stage('Build Image') {
+        stage('Build and Push Image') {
             steps {
-                echo "Let's build the image for ${shortSHA} in ${branch}"
-                echo "The change commit message to build is '${commitMessage}'"
-                echo 'build successful and published image with the following tags:'
-                echo "Tags: ${shortSHA}, ${fullSHA}"
+                script {
+                    echo "Let's build the image for ${shortSHA} in ${branch}"
+                    echo "The change commit message to build is '${commitMessage}'"
+
+                    def app = docker.build("${DOCKER_REPOSITORY}:${shortSHA}")
+
+                    docker.withRegistry('https://index.docker.io/v1/', 'dockerhub-credentials') {
+                        app.push("${shortSHA}")
+                        app.push("${fullSHA}")
+                    }
+
+                    echo 'build successful and published image with the following tags:'
+                    echo "Tags: ${shortSHA}, ${fullSHA}"
+                }
             }
         }
     }
