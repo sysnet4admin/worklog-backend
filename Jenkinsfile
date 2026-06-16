@@ -10,6 +10,7 @@ pipeline {
             steps {
                 script {
                     env.SHORT_SHA = sh(script: 'git rev-parse --short HEAD', returnStdout: true).trim()
+                    env.COMMIT_MESSAGE = sh(script: 'git log -1 --pretty=%B', returnStdout: true).trim()
                     if (env.TAG_NAME) {
                         env.TARGET_ENV = 'prod'
                         env.NAMESPACE = 'prod'
@@ -54,8 +55,9 @@ pipeline {
                     echo ${DOCKERHUB_CREDENTIALS_PSW} | docker login --username ${DOCKERHUB_CREDENTIALS_USR} --password-stdin
                     docker buildx build --platform linux/arm64 \\
                         -t ${DOCKER_REPOSITORY}:${IMAGE_TAG} \\
+                        -t ${DOCKER_REPOSITORY}:${SHORT_SHA} \\
                         --push .
-                    echo "build successful: ${IMAGE_TAG}"
+                    echo "build successful: ${IMAGE_TAG}, ${SHORT_SHA}"
                 """
             }
         }
@@ -81,7 +83,7 @@ pipeline {
         }
     }
     post {
-        success { echo "Deploy to ${env.TARGET_ENV} (${env.ARGOCD_APP}) completed" }
+        success { echo "Deploy to ${env.TARGET_ENV} (${env.ARGOCD_APP}) — Argo CD automated sync will pick up the manifest change" }
         failure { echo "Pipeline failed for ${env.TARGET_ENV}" }
     }
 }
