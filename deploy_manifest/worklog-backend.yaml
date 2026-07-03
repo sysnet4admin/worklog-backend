@@ -74,20 +74,22 @@ spec:
     app: worklog-backend
   type: ClusterIP
 ---
-apiVersion: gateway.networking.k8s.io/v1
-kind: HTTPRoute
+apiVersion: networking.k8s.io/v1
+kind: Ingress
 metadata:
   name: worklog-backend
+  annotations:
+    alb.ingress.kubernetes.io/scheme: internet-facing
+    alb.ingress.kubernetes.io/target-type: ip
 spec:
-  parentRefs:
-  - name: nginx-gateway
-  hostnames:
-  - worklog-backend.myk8s.local
+  ingressClassName: alb
   rules:
-  - matches:
-    - path:
-        type: PathPrefix
-        value: /
-    backendRefs:
-    - name: worklog-backend
-      port: 80
+    - http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: worklog-backend
+                port:
+                  number: 80
