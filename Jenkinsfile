@@ -18,40 +18,59 @@ pipeline {
                         currentBuild.result = 'NOT_BUILT'
                         error('skip: deploy commit by jenkins')
                     }
+                    // 환경과 이미지 태그 규칙은 8.6과 같다(태그 v* → prod, release/* → staging, 나머지 → dev)
                     env.SHORT_SHA = sh(script: 'git rev-parse --short HEAD', returnStdout: true).trim()
-                    env.COMMIT_MESSAGE = sh(script: 'git log -1 --pretty=%B', returnStdout: true).trim()
                     if (env.TAG_NAME) {
                         env.TARGET_ENV = 'prod'
-                        env.NAMESPACE = 'prod'
                         env.IMAGE_TAG = env.TAG_NAME
                         env.ARGOCD_APP = 'worklog-backend-prod'
                     } else if (env.BRANCH_NAME.startsWith('release/')) {
                         env.TARGET_ENV = 'staging'
-                        env.NAMESPACE = 'staging'
                         env.IMAGE_TAG = "staging-${env.SHORT_SHA}"
                         env.ARGOCD_APP = 'worklog-backend-staging'
-                    } else if (env.BRANCH_NAME == 'develop') {
-                        env.TARGET_ENV = 'dev'
-                        env.NAMESPACE = 'dev'
-                        env.IMAGE_TAG = "dev-${env.SHORT_SHA}"
-                        env.ARGOCD_APP = 'worklog-backend-dev'
                     } else {
                         env.TARGET_ENV = 'dev'
-                        env.NAMESPACE = 'dev'
                         env.IMAGE_TAG = "dev-${env.SHORT_SHA}"
                         env.ARGOCD_APP = 'worklog-backend-dev'
                     }
                 }
             }
         }
-        stage('Test') {
+        stage('Lint') {   // 9.3
             steps {
                 sh '''
-                    curl -LsSf https://astral.sh/uv/install.sh | sh
+                    curl -LsSf https://astral.sh/uv/0.11.18/install.sh | sh
                     export PATH="$HOME/.local/bin:$PATH"
                     uv sync --extra dev
+                    uv run ruff check src/
+                '''
+            }
+        }
+        stage('Security Scan') {   // 9.4
+            steps {
+                sh '''
+                    export PATH="$HOME/.local/bin:$PATH"
+                    uv run pip-audit
+
+                    # gitleaks: 노드 아키텍처에 맞는 바이너리를 받는다
+                    GITLEAKS_VERSION=8.30.1
+                    case "$(uname -m)" in
+                        x86_64)        GL_ARCH=x64 ;;
+                        aarch64|arm64) GL_ARCH=arm64 ;;
+                        *)             GL_ARCH=x64 ;;
+                    esac
+                    curl -sSfL "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_${GL_ARCH}.tar.gz" \\
+                        | tar -xz -C /tmp/ gitleaks
+                    /tmp/gitleaks detect --source . --config .gitleaks.toml --no-banner
+                '''
+            }
+        }
+        stage('Test') {   // 9.5
+            steps {
+                sh '''
+                    export PATH="$HOME/.local/bin:$PATH"
                     TESTING=true uv run coverage run --source ./src/worklog -m pytest --disable-warnings -v
-                    uv run coverage report
+                    uv run coverage report --fail-under=80
                 '''
             }
         }
@@ -66,7 +85,14 @@ pipeline {
                         -t ${DOCKER_REPOSITORY}:${IMAGE_TAG} \\
                         -t ${DOCKER_REPOSITORY}:${SHORT_SHA} \\
                         --push .
-                    echo "build successful: ${IMAGE_TAG}, ${SHORT_SHA}"
+                """
+            }
+        }
+        stage('Scan') {   // 9.6: HIGH 이상이 있으면 여기서 멈추고 매니페스트를 고치지 않는다
+            steps {
+                sh """
+                    curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh -s -- -b /tmp
+                    /tmp/trivy image --exit-code 1 --severity CRITICAL,HIGH --ignore-unfixed --format table ${DOCKER_REPOSITORY}:${IMAGE_TAG}
                 """
             }
         }
@@ -86,7 +112,7 @@ pipeline {
                         git remote set-url origin "https://\$GITHUB_CREDENTIALS_USR:\$GITHUB_CREDENTIALS_PSW@github.com/${GITHUB_CREDENTIALS_USR}/worklog-backend.git"
                         git add deploy_manifest/
                         git diff --staged --quiet || git commit -m "deploy: update image tag to ${imageTag} for ${targetEnv}"
-                        git pull --rebase -X theirs origin ${branch}
+                        git pull --rebase origin ${branch} || git rebase --abort
                         git push origin HEAD:${branch}
                     """
                 }
@@ -94,7 +120,7 @@ pipeline {
         }
     }
     post {
-        success { echo "Deploy to ${env.TARGET_ENV} (${env.ARGOCD_APP}) — Argo CD automated sync will pick up the manifest change" }
+        success { echo "Deploy to ${env.TARGET_ENV} (${env.ARGOCD_APP}) completed" }
         failure { echo "Pipeline failed for ${env.TARGET_ENV}" }
     }
 }
