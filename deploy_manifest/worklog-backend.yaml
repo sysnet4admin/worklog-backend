@@ -23,7 +23,7 @@ spec:
     spec:
       containers:
       - name: worklog-backend
-        image: sysnet4admin/worklog-backend:dev-620976e
+        image: sysnet4admin/worklog-backend:dev-571c920
         ports:
         - containerPort: 80
         env:
