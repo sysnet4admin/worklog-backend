@@ -3,7 +3,7 @@ pipeline {
     // agent any면 컨트롤러 실행기(numExecutors: 2)로 갈 수 있고 그때 'docker: not found'로 실패한다(run-38 7.9).
     agent { label 'jenkins-jenkins-agent' }
     environment {
-        DOCKER_REPOSITORY = '<dockerhub_username>/worklog-backend'
+        DOCKER_REPOSITORY = 'sysnet4admin/worklog-backend'
         DOCKERHUB_CREDENTIALS = credentials('dockerhub-credentials')
         GITHUB_CREDENTIALS = credentials('github-token')
     }
