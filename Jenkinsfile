@@ -13,7 +13,8 @@ pipeline {
                 script {
                     // Jenkins가 남긴 배포 커밋(deploy_manifest만 변경)이면 다시 빌드하지 않는다.
                     // 없으면 스캔할 때마다 배포 커밋을 빌드해 또 배포 커밋을 만든다(run-38 8.5에서 확인).
-                    if (sh(script: 'git log -1 --format=%an', returnStdout: true).trim() == 'jenkins') {
+                    // 태그는 건너뛰지 않는다. main 최신 커밋(대개 배포 커밋)에 태그를 붙이기 때문이다.
+                    if (!env.TAG_NAME && sh(script: 'git log -1 --format=%an', returnStdout: true).trim() == 'jenkins') {
                         currentBuild.result = 'NOT_BUILT'
                         error('skip: deploy commit by jenkins')
                     }
