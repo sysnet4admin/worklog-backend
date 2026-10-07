@@ -35,11 +35,30 @@ pipeline {
                 '''
             }
         }
-        stage('Test') {
+        stage('Security Scan') {
             steps {
                 sh '''
                     export PATH="$HOME/.local/bin:$PATH"
                     uv sync --extra dev
+                    uv run pip-audit
+
+                    # gitleaks: 노드 아키텍처에 맞는 바이너리를 받는다
+                    GITLEAKS_VERSION=8.30.1
+                    case "$(uname -m)" in
+                        x86_64)        GL_ARCH=x64 ;;
+                        aarch64|arm64) GL_ARCH=arm64 ;;
+                        *)             GL_ARCH=x64 ;;
+                    esac
+                    curl -sSfL "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_${GL_ARCH}.tar.gz" \
+                        | tar -xz -C /tmp/ gitleaks
+                    /tmp/gitleaks detect --source . --config .gitleaks.toml --no-banner
+                '''
+            }
+        }
+        stage('Test') {
+            steps {
+                sh '''
+                    export PATH="$HOME/.local/bin:$PATH"
                     TESTING=true uv run coverage run --source ./src/worklog -m pytest --disable-warnings -v
                     uv run coverage report
                 '''
