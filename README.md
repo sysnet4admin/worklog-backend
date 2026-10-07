@@ -108,3 +108,4 @@ $ poetry run isort --profile black .
 ch7.8 backend trigger 1780745905
 
 <!-- run-38 ch6.8 jenkins-only check -->
+# 판단13,17 확인 06:23:48
