@@ -10,7 +10,9 @@ def sendSlackMessage(statusMessage, commitMessage, shortSHA, fullSHA) {
 }
 
 pipeline {
-    agent any
+    // 컨트롤러에는 docker가 없으므로 docker.sock을 가진 k8s 에이전트(JCasC kubernetes cloud)에서 실행.
+    // label은 ch4.5 jenkins-config.yaml의 podTemplate label과 일치해야 함.
+    agent { label 'jenkins-jenkins-agent' }
     stages {
         stage('Init Variables') {
             steps {
@@ -23,9 +25,16 @@ pipeline {
             }
         }
         stage('Run Test') {
+            // 에이전트 pod에 uv를 직접 설치해 실행(중첩 docker agent 대신).
+            // 중첩 docker agent는 에이전트 안에서 또 docker run을 띄워야 해 환경에 따라 불안정.
             steps {
                 echo "let's run a test for ${shortSHA} in ${branch}"
                 echo "running test for ${fullSHA}"
+                sh '''
+                    curl -LsSf https://astral.sh/uv/0.11.18/install.sh | sh
+                    export PATH=$HOME/.local/bin:$PATH
+                    uv sync --extra dev
+                '''
                 echo 'Test Passed!'
             }
         }
@@ -35,12 +44,6 @@ pipeline {
                 echo "The change commit message to build is '${commitMessage}'"
                 echo 'build successful and published image with the following tags:'
                 echo "Tags: ${shortSHA}, ${fullSHA}"
-            }
-        }
-        stage('Deploy Image') {
-            steps {
-                echo "Let's deploy the image"
-                echo "Deploying our image ${fullSHA} to the cluster"
             }
         }
     }
