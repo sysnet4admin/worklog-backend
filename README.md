@@ -106,3 +106,5 @@ $ poetry run black .
 $ poetry run isort --profile black .
 ```
 ch7.8 backend trigger 1780745905
+
+<!-- run-38 ch6.8 jenkins-only check -->
