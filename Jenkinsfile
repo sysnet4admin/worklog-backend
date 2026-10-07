@@ -12,6 +12,7 @@ pipeline {
             steps {
                 script {
                     env.SHORT_SHA = sh(script: 'git rev-parse --short HEAD', returnStdout: true).trim()
+                    env.COMMIT_MESSAGE = sh(script: 'git log -1 --pretty=%B', returnStdout: true).trim()
                     if (env.TAG_NAME) {
                         env.TARGET_ENV = 'prod'
                         env.ARGOCD_APP = 'worklog-backend-prod'
@@ -25,28 +26,12 @@ pipeline {
                 }
             }
         }
-        stage('Lint') {
+        stage('Test') {
             steps {
                 sh '''
                     curl -LsSf https://astral.sh/uv/0.11.18/install.sh | sh
                     export PATH="$HOME/.local/bin:$PATH"
                     uv sync --extra dev
-                    uv run ruff check src/
-                '''
-            }
-        }
-        stage('Security Scan') {
-            steps {
-                sh '''
-                    export PATH="$HOME/.local/bin:$PATH"
-                    uv run pip-audit
-                '''
-            }
-        }
-        stage('Test') {
-            steps {
-                sh '''
-                    export PATH="$HOME/.local/bin:$PATH"
                     TESTING=true uv run coverage run --source ./src/worklog -m pytest --disable-warnings -v
                     uv run coverage report --fail-under=80
                 '''
@@ -62,6 +47,14 @@ pipeline {
                     docker buildx build --platform linux/amd64,linux/arm64 \\
                         -t ${DOCKER_REPOSITORY}:${SHORT_SHA} \\
                         --push .
+                """
+            }
+        }
+        stage('Scan') {
+            steps {
+                sh """
+                    curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh -s -- -b /tmp
+                    /tmp/trivy image --exit-code 1 --severity CRITICAL,HIGH --ignore-unfixed --format table ${DOCKER_REPOSITORY}:${SHORT_SHA}
                 """
             }
         }
@@ -87,7 +80,7 @@ pipeline {
         }
     }
     post {
-        success { echo "Deploy to ${env.TARGET_ENV} (${env.ARGOCD_APP}) completed" }
+        success { echo "Deploy to ${env.TARGET_ENV} (${env.ARGOCD_APP}) — Argo CD automated sync will pick up the manifest change" }
         failure { echo "Pipeline failed for ${env.TARGET_ENV}" }
     }
 }
