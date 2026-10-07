@@ -1,4 +1,4 @@
-name: Multi-Environment Deploy
+name: Full CI/CD Workflow (Argo CD)
 concurrency:
   group: worklog-deploy-${{ github.ref }}
   cancel-in-progress: false
@@ -24,6 +24,7 @@ jobs:
       environment: ${{ steps.set-env.outputs.environment }}
       namespace: ${{ steps.set-env.outputs.namespace }}
       image_tag: ${{ steps.set-env.outputs.image_tag }}
+      argocd_app: ${{ steps.set-env.outputs.argocd_app }}
     steps:
       - name: Determine target environment
         id: set-env
@@ -32,35 +33,53 @@ jobs:
             echo "environment=dev" >> $GITHUB_OUTPUT
             echo "namespace=dev" >> $GITHUB_OUTPUT
             echo "image_tag=pr-${{ github.event.pull_request.number }}" >> $GITHUB_OUTPUT
+            echo "argocd_app=worklog-backend-dev" >> $GITHUB_OUTPUT
           elif [[ "${{ github.ref }}" == refs/heads/develop ]]; then
             echo "environment=dev" >> $GITHUB_OUTPUT
             echo "namespace=dev" >> $GITHUB_OUTPUT
             SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-8)
             echo "image_tag=dev-${SHORT_SHA}" >> $GITHUB_OUTPUT
+            echo "argocd_app=worklog-backend-dev" >> $GITHUB_OUTPUT
           elif [[ "${{ github.ref }}" == refs/heads/release/* ]]; then
             echo "environment=staging" >> $GITHUB_OUTPUT
             echo "namespace=staging" >> $GITHUB_OUTPUT
             SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-8)
             echo "image_tag=staging-${SHORT_SHA}" >> $GITHUB_OUTPUT
+            echo "argocd_app=worklog-backend-staging" >> $GITHUB_OUTPUT
           elif [[ "${{ github.ref }}" == refs/tags/v* ]]; then
             echo "environment=prod" >> $GITHUB_OUTPUT
             echo "namespace=prod" >> $GITHUB_OUTPUT
             TAG=${GITHUB_REF#refs/tags/}
             echo "image_tag=${TAG}" >> $GITHUB_OUTPUT
+            echo "argocd_app=worklog-backend-prod" >> $GITHUB_OUTPUT
           else
             echo "environment=dev" >> $GITHUB_OUTPUT
             echo "namespace=dev" >> $GITHUB_OUTPUT
             SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-8)
             echo "image_tag=dev-${SHORT_SHA}" >> $GITHUB_OUTPUT
+            echo "argocd_app=worklog-backend-dev" >> $GITHUB_OUTPUT
           fi
 
   init-and-test:
     runs-on: ubuntu-latest
+    outputs:
+      full_sha: ${{ steps.vars.outputs.full_sha }}
+      short_sha: ${{ steps.vars.outputs.short_sha }}
+      commit_message: ${{ steps.vars.outputs.commit_message }}
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5
         with:
           python-version: '3.14'
+      - id: vars
+        name: Init variables
+        run: |
+          full_sha=${{ github.sha }}
+          short_sha=$(echo ${full_sha} | cut -c1-8)
+          commit_message=$(git log -1 --format="*%s* by _%an_")
+          echo "full_sha=${full_sha}" >> $GITHUB_OUTPUT
+          echo "short_sha=${short_sha}" >> $GITHUB_OUTPUT
+          echo "commit_message=${commit_message}" >> $GITHUB_OUTPUT
       - name: Run test
         run: |
           uv sync --extra dev
@@ -82,26 +101,29 @@ jobs:
           IMAGE_TAG=${{ needs.determine-environment.outputs.image_tag }}
           docker buildx build --platform linux/amd64,linux/arm64 --push \
             -t ${{ env.DOCKER_REPOSITORY }}:${IMAGE_TAG} \
+            -t ${{ env.DOCKER_REPOSITORY }}:${{ needs.init-and-test.outputs.short_sha }} \
             .
-          echo "build successful: ${IMAGE_TAG}"
+          echo "build successful: ${IMAGE_TAG}, ${{ needs.init-and-test.outputs.short_sha }}"
 
-  deploy:
+  update-manifest:
     runs-on: ubuntu-latest
-    needs: [determine-environment, build]
-    environment: ${{ needs.determine-environment.outputs.environment }}
+    needs: [determine-environment, init-and-test, build]
     steps:
       - uses: actions/checkout@v4
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
-      - name: Update manifest and push
+      - name: Update manifest with new image tag
         run: |
           IMAGE_TAG=${{ needs.determine-environment.outputs.image_tag }}
           NAMESPACE=${{ needs.determine-environment.outputs.namespace }}
-          sed -i "s|image: .*worklog-backend:.*|image: ${{ env.DOCKER_REPOSITORY }}:${IMAGE_TAG}|" deploy_manifest/worklog-backend.yaml
-          sed -i "s|value: .* # IMAGE_TAG|value: \"${IMAGE_TAG}\" # IMAGE_TAG|" deploy_manifest/worklog-backend.yaml
+
+          cd deploy_manifest
+          sed -i "s|image: .*worklog-backend:.*|image: ${{ env.DOCKER_REPOSITORY }}:${IMAGE_TAG}|" worklog-backend.yaml
+          sed -i "s|value: .*# IMAGE_TAG|value: \"${IMAGE_TAG}\" # IMAGE_TAG|" worklog-backend.yaml
+
           git config user.name "github-actions"
           git config user.email "github-actions@github.com"
-          git add deploy_manifest/
+          git add .
           git diff --staged --quiet || git commit -m "deploy: update image tag to ${IMAGE_TAG} for ${NAMESPACE}"
           if [[ "${{ github.ref }}" == refs/tags/* ]]; then
             BRANCH="main"
@@ -116,15 +138,26 @@ jobs:
   notify-success-result:
     if: ${{ success() }}
     runs-on: ubuntu-latest
-    needs: [determine-environment, build, deploy]
+    needs: [determine-environment, init-and-test, build, update-manifest]
     steps:
       - name: Notification Success
-        run: echo "Deploy to ${{ needs.determine-environment.outputs.environment }} succeeded"
+        run: |
+          echo "Full CI/CD pipeline completed successfully"
+          echo "Environment: ${{ needs.determine-environment.outputs.environment }}"
+          echo "Namespace: ${{ needs.determine-environment.outputs.namespace }}"
+          echo "Image Tag: ${{ needs.determine-environment.outputs.image_tag }}"
+          echo "Argo CD App: ${{ needs.determine-environment.outputs.argocd_app }}"
+          echo "Commit: ${{ needs.init-and-test.outputs.commit_message }}"
 
   notify-failure-result:
     if: ${{ failure() }}
     runs-on: ubuntu-latest
-    needs: [determine-environment, build, deploy]
+    needs: [determine-environment, init-and-test, build, update-manifest]
     steps:
       - name: Notification Failure
-        run: echo "Pipeline failed for ${{ needs.determine-environment.outputs.environment }}"
+        run: |
+          echo "Full CI/CD pipeline failed"
+          echo "Environment: ${{ needs.determine-environment.outputs.environment }}"
+          echo "Namespace: ${{ needs.determine-environment.outputs.namespace }}"
+          echo "Image Tag: ${{ needs.determine-environment.outputs.image_tag }}"
+          echo "Commit: ${{ needs.init-and-test.outputs.commit_message }}"
