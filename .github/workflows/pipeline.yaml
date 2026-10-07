@@ -45,8 +45,8 @@ jobs:
         run: |
           echo "Let's build the image for ${{ needs.init-and-test.outputs.full_sha }}"
           echo "The change commit message to build is '${{ needs.init-and-test.outputs.commit_message }}'"
-          echo "build successful and published image with the following tags:"
-          echo "Tags: ${{ needs.init-and-test.outputs.short_sha }}, ${{ needs.init-and-test.outputs.full_sha }}"
+          echo "Oops, something went wrong with this build.."
+          exit 1
   deploy:
     runs-on: ubuntu-latest
     needs: [init-and-test, build]
