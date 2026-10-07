@@ -21,6 +21,8 @@ jobs:
       - name: Build image
         run: |
           echo "Let's build the image"
+          echo "Oops, something went wrong with this build.."
+          exit 1
   deploy:
     runs-on: ubuntu-latest
     needs: ["test", "build"]
