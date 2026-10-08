@@ -126,6 +126,18 @@ pipeline {
             }
         }
 
+        stage('Scan') {
+            when { expression { env.SKIP_BUILD != 'true' } }
+            // Build가 push한 이미지를 Trivy로 검사한다. CRITICAL, HIGH가 나오면 여기서 실패해 Update Manifest로 가지 않는다.
+            // 에이전트 사용자는 /usr/local/bin에 쓸 수 없어 trivy를 /tmp에 설치한다.
+            steps {
+                sh '''
+                    curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh -s -- -b /tmp
+                    /tmp/trivy image --exit-code 1 --severity CRITICAL,HIGH --ignore-unfixed --format table "$DOCKER_REPOSITORY:$IMAGE_TAG"
+                '''
+            }
+        }
+
         stage('Update Manifest') {
             when { expression { env.SKIP_BUILD != 'true' } }
             // argocd CLI를 부르지 않는다. push만 하면 Argo CD automated sync가 변경을 가져가 배포한다.
