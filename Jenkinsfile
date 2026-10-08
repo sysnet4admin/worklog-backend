@@ -22,6 +22,7 @@ pipeline {
                     env.LAST_AUTHOR = sh(script: 'git log -1 --format=%an', returnStdout: true).trim()
                     env.SKIP_BUILD = (!env.TAG_NAME && env.LAST_AUTHOR == 'jenkins') ? 'true' : 'false'
                     env.SHORT_SHA = sh(script: 'git rev-parse --short=8 HEAD', returnStdout: true).trim()
+                    env.COMMIT_MESSAGE = sh(script: 'git log -1 --format=%s', returnStdout: true).trim()
 
                     if (env.TAG_NAME && env.TAG_NAME.startsWith('v')) {
                         env.TARGET_ENV = 'prod'
@@ -40,6 +41,8 @@ pipeline {
                         env.NAMESPACE = 'dev'
                         env.IMAGE_TAG = "dev-${env.SHORT_SHA}"
                     }
+                    // 환경마다 Argo CD Application이 하나씩 있다(8.4에서 만든 worklog-backend-dev/staging/prod).
+                    env.ARGOCD_APP = "worklog-backend-${env.TARGET_ENV}"
                     // 태그 빌드는 BRANCH_NAME에도 태그 이름이 들어가 그대로 push하면 거절된다.
                     // prod Application이 main을 보므로 태그 빌드는 main의 매니페스트를 고친다.
                     env.PUSH_BRANCH = env.TAG_NAME ? 'main' : env.BRANCH_NAME
@@ -49,7 +52,8 @@ pipeline {
                         echo 'skip: deploy commit by jenkins'
                     }
                 }
-                echo "TARGET_ENV=${env.TARGET_ENV} NAMESPACE=${env.NAMESPACE} IMAGE_TAG=${env.IMAGE_TAG} PUSH_BRANCH=${env.PUSH_BRANCH}"
+                echo "COMMIT=${env.SHORT_SHA} (${env.COMMIT_MESSAGE})"
+                echo "TARGET_ENV=${env.TARGET_ENV} NAMESPACE=${env.NAMESPACE} IMAGE_TAG=${env.IMAGE_TAG} ARGOCD_APP=${env.ARGOCD_APP} PUSH_BRANCH=${env.PUSH_BRANCH}"
             }
         }
 
@@ -70,6 +74,7 @@ pipeline {
         stage('Build') {
             when { expression { env.SKIP_BUILD != 'true' } }
             // 작은따옴표 sh라 비밀값을 Groovy가 아니라 셸이 푼다(로그와 프로세스 인자에 남지 않는다).
+            // 태그 두 개: IMAGE_TAG는 매니페스트가 가리키는 배포용, SHORT_SHA는 어느 커밋에서 나왔는지 찾는 용도.
             steps {
                 sh '''
                     docker run --privileged --rm tonistiigi/binfmt --install all 2>/dev/null || true
@@ -78,14 +83,17 @@ pipeline {
                     echo "$DOCKERHUB_CREDENTIALS_PSW" | docker login --username "$DOCKERHUB_CREDENTIALS_USR" --password-stdin
                     docker buildx build --platform "$BUILD_PLATFORMS" \\
                         -t "$DOCKER_REPOSITORY:$IMAGE_TAG" \\
+                        -t "$DOCKER_REPOSITORY:$SHORT_SHA" \\
                         --push .
                 '''
-                echo "Built: ${env.DOCKER_REPOSITORY}:${env.IMAGE_TAG}"
+                echo "Built: ${env.DOCKER_REPOSITORY}:${env.IMAGE_TAG}, ${env.DOCKER_REPOSITORY}:${env.SHORT_SHA}"
             }
         }
 
         stage('Update Manifest') {
             when { expression { env.SKIP_BUILD != 'true' } }
+            // argocd CLI를 부르지 않는다. push만 하면 Argo CD automated sync가 변경을 가져가 배포한다.
+            // (에이전트에서 argocd login을 하면 ~/.config/argocd/config 권한 0660 때문에 실패한다)
             steps {
                 sh '''
                     git rebase --abort 2>/dev/null || true
@@ -99,14 +107,14 @@ pipeline {
                     git pull --rebase -X theirs origin "$PUSH_BRANCH"
                     git push origin "HEAD:$PUSH_BRANCH"
                 '''
-                echo "Manifest updated: ${env.IMAGE_TAG} -> ${env.PUSH_BRANCH}"
+                echo "Manifest pushed to ${env.PUSH_BRANCH}: ${env.IMAGE_TAG}. Argo CD(${env.ARGOCD_APP}) will sync automatically."
             }
         }
     }
 
     post {
-        success { echo "Deploy to ${env.TARGET_ENV} completed: ${env.DOCKER_REPOSITORY}:${env.IMAGE_TAG}" }
-        failure { echo "Pipeline failed for ${env.TARGET_ENV}: ${env.IMAGE_TAG}" }
+        success { echo "Pipeline succeeded: ARGOCD_APP=${env.ARGOCD_APP} TARGET_ENV=${env.TARGET_ENV} IMAGE=${env.DOCKER_REPOSITORY}:${env.IMAGE_TAG}" }
+        failure { echo "Pipeline failed: ARGOCD_APP=${env.ARGOCD_APP} TARGET_ENV=${env.TARGET_ENV} IMAGE_TAG=${env.IMAGE_TAG}" }
         always { sh 'docker buildx rm backend-builder 2>/dev/null || true' }
     }
 }
