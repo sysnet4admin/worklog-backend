@@ -57,6 +57,19 @@ pipeline {
             }
         }
 
+        stage('Lint') {
+            when { expression { env.SKIP_BUILD != 'true' } }
+            // ruff.toml 규칙으로 src/를 검사한다. 위반이 있으면 여기서 실패해 Test, Build로 가지 않는다.
+            steps {
+                sh '''
+                    curl -LsSf https://astral.sh/uv/0.11.18/install.sh | sh
+                    export PATH="$HOME/.local/bin:$PATH"
+                    uv sync --extra dev
+                    uv run ruff check src/
+                '''
+            }
+        }
+
         stage('Test') {
             when { expression { env.SKIP_BUILD != 'true' } }
             // 에이전트 Pod에 uv를 설치해 바로 실행한다. 중첩 docker agent는 환경에 따라 불안정하다.
