@@ -1,4 +1,4 @@
-name: Multi-Environment Deploy
+name: Full CI/CD Workflow (Argo CD)
 concurrency:
   group: worklog-deploy-${{ github.ref }}
   cancel-in-progress: false
@@ -28,6 +28,7 @@ jobs:
       environment: ${{ steps.set-env.outputs.environment }}
       namespace: ${{ steps.set-env.outputs.namespace }}
       image_tag: ${{ steps.set-env.outputs.image_tag }}
+      argocd_app: ${{ steps.set-env.outputs.argocd_app }}
     steps:
       - name: Determine target environment
         id: set-env
@@ -49,18 +50,34 @@ jobs:
             ENVIRONMENT=dev
             IMAGE_TAG=dev-${SHORT_SHA}
           fi
+          # Argo CD Application 이름은 환경 이름을 따른다(8.4의 2.argocd-apps-multi-env.yaml)
+          ARGOCD_APP=worklog-backend-${ENVIRONMENT}
           echo "environment=${ENVIRONMENT}" >> $GITHUB_OUTPUT
           echo "namespace=${ENVIRONMENT}" >> $GITHUB_OUTPUT
           echo "image_tag=${IMAGE_TAG}" >> $GITHUB_OUTPUT
-          echo "environment=${ENVIRONMENT} namespace=${ENVIRONMENT} image_tag=${IMAGE_TAG}"
+          echo "argocd_app=${ARGOCD_APP}" >> $GITHUB_OUTPUT
+          echo "environment=${ENVIRONMENT} namespace=${ENVIRONMENT} image_tag=${IMAGE_TAG} argocd_app=${ARGOCD_APP}"
 
   init-and-test:
     runs-on: ubuntu-latest
+    outputs:
+      full_sha: ${{ steps.vars.outputs.full_sha }}
+      short_sha: ${{ steps.vars.outputs.short_sha }}
+      commit_message: ${{ steps.vars.outputs.commit_message }}
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5
         with:
           python-version: '3.14'
+      - id: vars
+        name: Init variables
+        run: |
+          full_sha=${GITHUB_SHA}
+          short_sha=${full_sha::8}
+          commit_message=$(git log -1 --format="*%s* by _%an_")
+          echo "full_sha=${full_sha}" >> $GITHUB_OUTPUT
+          echo "short_sha=${short_sha}" >> $GITHUB_OUTPUT
+          echo "commit_message=${commit_message}" >> $GITHUB_OUTPUT
       - name: Run tests
         run: |
           uv sync --extra dev
@@ -79,14 +96,17 @@ jobs:
       - name: Build and push (multi-arch)
         run: |
           IMAGE_TAG=${{ needs.determine-environment.outputs.image_tag }}
+          SHORT_SHA=${{ needs.init-and-test.outputs.short_sha }}
           docker buildx build --platform linux/amd64,linux/arm64 --push \
             -t ${{ env.DOCKER_REPOSITORY }}:${IMAGE_TAG} \
+            -t ${{ env.DOCKER_REPOSITORY }}:${SHORT_SHA} \
             .
-          echo "build successful: ${{ env.DOCKER_REPOSITORY }}:${IMAGE_TAG}"
+          echo "build successful: ${{ env.DOCKER_REPOSITORY }}:${IMAGE_TAG}, ${{ env.DOCKER_REPOSITORY }}:${SHORT_SHA}"
 
-  deploy:
+  # 매니페스트만 고쳐 push한다. 클러스터 반영은 Argo CD automated sync가 한다(argocd CLI를 부르지 않는다)
+  update-manifest:
     runs-on: ubuntu-latest
-    needs: [determine-environment, build]
+    needs: [determine-environment, init-and-test, build]
     environment: ${{ needs.determine-environment.outputs.environment }}
     steps:
       - uses: actions/checkout@v4
@@ -124,15 +144,31 @@ jobs:
   notify-success-result:
     if: ${{ success() }}
     runs-on: ubuntu-latest
-    needs: [determine-environment, init-and-test, build, deploy]
+    needs: [determine-environment, init-and-test, build, update-manifest]
     steps:
       - name: Notification Success
-        run: echo "Deploy to ${{ needs.determine-environment.outputs.environment }} succeeded (image_tag=${{ needs.determine-environment.outputs.image_tag }})"
+        env:
+          COMMIT_MESSAGE: ${{ needs.init-and-test.outputs.commit_message }}
+        run: |
+          echo "Full CI/CD pipeline completed successfully"
+          echo "Environment: ${{ needs.determine-environment.outputs.environment }}"
+          echo "Namespace: ${{ needs.determine-environment.outputs.namespace }}"
+          echo "Image Tag: ${{ needs.determine-environment.outputs.image_tag }}"
+          echo "Argo CD App: ${{ needs.determine-environment.outputs.argocd_app }}"
+          echo "Commit: ${COMMIT_MESSAGE}"
 
   notify-failure-result:
     if: ${{ failure() }}
     runs-on: ubuntu-latest
-    needs: [determine-environment, init-and-test, build, deploy]
+    needs: [determine-environment, init-and-test, build, update-manifest]
     steps:
       - name: Notification Failure
-        run: echo "Pipeline failed for ${{ needs.determine-environment.outputs.environment }} (image_tag=${{ needs.determine-environment.outputs.image_tag }})"
+        env:
+          COMMIT_MESSAGE: ${{ needs.init-and-test.outputs.commit_message }}
+        run: |
+          echo "Full CI/CD pipeline failed"
+          echo "Environment: ${{ needs.determine-environment.outputs.environment }}"
+          echo "Namespace: ${{ needs.determine-environment.outputs.namespace }}"
+          echo "Image Tag: ${{ needs.determine-environment.outputs.image_tag }}"
+          echo "Argo CD App: ${{ needs.determine-environment.outputs.argocd_app }}"
+          echo "Commit: ${COMMIT_MESSAGE}"
