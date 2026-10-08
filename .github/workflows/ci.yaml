@@ -53,4 +53,4 @@ jobs:
           uv sync --extra dev
           export TESTING=true
           uv run coverage run --source ./src/worklog -m pytest --disable-warnings -v
-          uv run coverage report --fail-under=80
+          uv run coverage report --fail-under=99
