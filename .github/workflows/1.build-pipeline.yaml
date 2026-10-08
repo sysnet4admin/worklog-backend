@@ -1,9 +1,17 @@
-name: worklog backend pipeline (marketplace)
+name: worklog backend pipeline (Argo CD)
+concurrency:
+  group: worklog-deploy-${{ github.ref }}
+  cancel-in-progress: false
 
 on:
   push:
     branches:
       - main
+    paths-ignore:
+      - 'deploy_manifest/**'
+
+permissions:
+  contents: write
 
 env:
   DOCKER_REPOSITORY: sysnet4admin/worklog-backend
@@ -76,10 +84,29 @@ jobs:
           echo "build successful and published image with the following tags:"
           echo "Tags: ${{ needs.init-and-test.outputs.short_sha }}, ${{ needs.init-and-test.outputs.full_sha }}"
 
+  deploy:
+    runs-on: ubuntu-latest
+    needs: [init-and-test, build]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Update manifest and push
+        run: |
+          cd deploy_manifest
+          sed -i "s|image: .*worklog-backend:.*|image: ${{ env.DOCKER_REPOSITORY }}:${{ needs.init-and-test.outputs.short_sha }}|" worklog-backend.yaml
+          sed -i "s|value: .* # IMAGE_TAG|value: \"${{ needs.init-and-test.outputs.short_sha }}\" # IMAGE_TAG|" worklog-backend.yaml
+          git config user.name "github-actions"
+          git config user.email "github-actions@github.com"
+          git add .
+          git commit -m "deploy: update image tag to ${{ needs.init-and-test.outputs.short_sha }}"
+          git pull --rebase -X theirs origin main
+          git push origin main
+
   notify-success-result:
     if: ${{ success() }}
     runs-on: ubuntu-latest
-    needs: [init-and-test, build]
+    needs: [init-and-test, build, deploy]
     steps:
       - name: Slack Notification Success
         run: |
@@ -90,7 +117,7 @@ jobs:
   notify-failure-result:
     if: ${{ failure() }}
     runs-on: ubuntu-latest
-    needs: [init-and-test, build]
+    needs: [init-and-test, build, deploy]
     steps:
       - name: Slack Notification Failure
         run: |
