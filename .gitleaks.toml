@@ -1,0 +1,15 @@
+# gitleaks v8 설정
+title = "cicd-learning-kit gitleaks config"
+
+# gitleaks 기본 룰셋을 그대로 쓴다.
+[extend]
+useDefault = true
+
+# 스캔에서 제외할 경로. 정규식이며 저장소 루트 기준 상대 경로에 매칭된다.
+[allowlist]
+description = "문서, 테스트, 배포 매니페스트는 스캔하지 않는다"
+paths = [
+  '''\.md$''',
+  '''(^|/)tests/''',
+  '''(^|/)deploy_manifest/''',
+]

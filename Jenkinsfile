@@ -70,6 +70,29 @@ pipeline {
             }
         }
 
+        stage('Security Scan') {
+            when { expression { env.SKIP_BUILD != 'true' } }
+            // pip-audit은 의존성의 알려진 취약점을, gitleaks는 커밋 이력에 들어간 비밀값을 찾는다.
+            // 하나라도 나오면 여기서 실패해 Test, Build로 가지 않는다. uv와 의존성은 Lint에서 설치한 것을 쓴다.
+            steps {
+                sh '''
+                    export PATH="$HOME/.local/bin:$PATH"
+                    uv run pip-audit
+
+                    # gitleaks: 버전을 고정하고 노드 아키텍처에 맞는 바이너리를 받는다
+                    GITLEAKS_VERSION=8.30.1
+                    case "$(uname -m)" in
+                        x86_64)        GL_ARCH=x64 ;;
+                        aarch64|arm64) GL_ARCH=arm64 ;;
+                        *)             GL_ARCH=x64 ;;
+                    esac
+                    curl -sSfL "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_${GL_ARCH}.tar.gz" \\
+                        | tar -xz -C /tmp/ gitleaks
+                    /tmp/gitleaks detect --source . --config .gitleaks.toml --no-banner
+                '''
+            }
+        }
+
         stage('Test') {
             when { expression { env.SKIP_BUILD != 'true' } }
             // 에이전트 Pod에 uv를 설치해 바로 실행한다. 중첩 docker agent는 환경에 따라 불안정하다.
