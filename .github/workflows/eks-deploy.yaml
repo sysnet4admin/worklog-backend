@@ -1,0 +1,103 @@
+name: worklog backend EKS deploy pipeline
+
+on:
+  push:
+    branches: [main, develop, 'release/*']
+    tags: ['v*']
+    paths-ignore:
+      - 'deploy_manifest/**'
+
+env:
+  DOCKER_REPOSITORY: <dockerhub_username>/worklog-backend
+  DOCKERHUB_USERNAME: <dockerhub_username>
+  DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+  AWS_REGION: ${{ secrets.AWS_REGION }}
+  EKS_CLUSTER_NAME: ${{ secrets.EKS_CLUSTER_NAME }}
+
+jobs:
+  init-and-test:
+    runs-on: ubuntu-latest
+    outputs:
+      full_sha: ${{ steps.vars.outputs.full_sha }}
+      short_sha: ${{ steps.vars.outputs.short_sha }}
+      commit_message: ${{ steps.vars.outputs.commit_message }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: '3.14'
+      - id: vars
+        name: Init variables
+        run: |
+          full_sha=${{ github.sha }}
+          short_sha=$(echo ${full_sha} | cut -c1-8)
+          commit_message=$(git log -1 --format="*%s* by _%an_")
+          echo "full_sha=${full_sha}" >> $GITHUB_OUTPUT
+          echo "short_sha=${short_sha}" >> $GITHUB_OUTPUT
+          echo "commit_message=${commit_message}" >> $GITHUB_OUTPUT
+      - name: Run test
+        run: |
+          uv sync --extra dev
+          export TESTING=true
+          uv run coverage run --source ./src/worklog -m pytest --disable-warnings -v
+          uv run coverage report
+
+  build:
+    runs-on: ubuntu-latest
+    needs: [init-and-test]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - name: Build and push
+        run: |
+          echo ${{ env.DOCKERHUB_TOKEN }} | docker login --username ${{ env.DOCKERHUB_USERNAME }} --password-stdin
+          docker buildx build --platform linux/amd64 --push \
+            -t ${{ env.DOCKER_REPOSITORY }}:${{ needs.init-and-test.outputs.short_sha }} \
+            -t ${{ env.DOCKER_REPOSITORY }}:${{ needs.init-and-test.outputs.full_sha }} \
+            .
+          echo "build successful: ${{ needs.init-and-test.outputs.short_sha }}"
+
+  deploy:
+    runs-on: ubuntu-latest
+    needs: [init-and-test, build]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+      - name: Update kubeconfig
+        run: |
+          aws eks update-kubeconfig --region ${{ env.AWS_REGION }} --name ${{ env.EKS_CLUSTER_NAME }}
+      - name: Deploy to EKS
+        run: |
+          SHORT_SHA=${{ needs.init-and-test.outputs.short_sha }}
+          sed -i "s|image: .*worklog-backend:.*|image: ${{ env.DOCKER_REPOSITORY }}:${SHORT_SHA}|" deploy_manifest/worklog-backend.yaml
+          sed -i "s|value: .*# IMAGE_TAG|value: \"${SHORT_SHA}\" # IMAGE_TAG|" deploy_manifest/worklog-backend.yaml
+          kubectl apply -f deploy_manifest/worklog-backend.yaml
+          kubectl rollout status deployment/worklog-backend --timeout=120s
+          echo "Deploy to EKS completed for tag ${SHORT_SHA}"
+
+  notify-success-result:
+    if: ${{ success() }}
+    runs-on: ubuntu-latest
+    needs: [init-and-test, build, deploy]
+    steps:
+      - name: Notification Success
+        run: |
+          echo "EKS deploy completed successfully"
+          echo "Commit: ${{ needs.init-and-test.outputs.commit_message }}"
+          echo "Tags: ${{ needs.init-and-test.outputs.short_sha }}"
+
+  notify-failure-result:
+    if: ${{ failure() }}
+    runs-on: ubuntu-latest
+    needs: [init-and-test, build, deploy]
+    steps:
+      - name: Notification Failure
+        run: |
+          echo "EKS deploy failed"
+          echo "Commit: ${{ needs.init-and-test.outputs.commit_message }}"
+          echo "Tags: ${{ needs.init-and-test.outputs.short_sha }}"
