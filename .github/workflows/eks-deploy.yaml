@@ -1,15 +1,17 @@
 name: worklog backend EKS deploy pipeline
+concurrency:
+  group: worklog-deploy-${{ github.ref }}
+  cancel-in-progress: false
 
 on:
   push:
-    branches: [main, develop, 'release/*']
-    tags: ['v*']
+    branches: [main]
     paths-ignore:
       - 'deploy_manifest/**'
 
 env:
-  DOCKER_REPOSITORY: <dockerhub_username>/worklog-backend
-  DOCKERHUB_USERNAME: <dockerhub_username>
+  DOCKER_REPOSITORY: sysnet4admin/worklog-backend
+  DOCKERHUB_USERNAME: sysnet4admin
   DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
   AWS_REGION: ${{ secrets.AWS_REGION }}
   EKS_CLUSTER_NAME: ${{ secrets.EKS_CLUSTER_NAME }}
@@ -20,6 +22,7 @@ jobs:
     outputs:
       full_sha: ${{ steps.vars.outputs.full_sha }}
       short_sha: ${{ steps.vars.outputs.short_sha }}
+      branch: ${{ steps.vars.outputs.branch }}
       commit_message: ${{ steps.vars.outputs.commit_message }}
     steps:
       - uses: actions/checkout@v4
@@ -31,9 +34,11 @@ jobs:
         run: |
           full_sha=${{ github.sha }}
           short_sha=$(echo ${full_sha} | cut -c1-8)
+          branch=${GITHUB_REF_NAME}
           commit_message=$(git log -1 --format="*%s* by _%an_")
           echo "full_sha=${full_sha}" >> $GITHUB_OUTPUT
           echo "short_sha=${short_sha}" >> $GITHUB_OUTPUT
+          echo "branch=${branch}" >> $GITHUB_OUTPUT
           echo "commit_message=${commit_message}" >> $GITHUB_OUTPUT
       - name: Run test
         run: |
@@ -47,16 +52,19 @@ jobs:
     needs: [init-and-test]
     steps:
       - uses: actions/checkout@v4
+      - uses: docker/setup-qemu-action@v3
       - uses: docker/setup-buildx-action@v3
-      - name: Build and push
+      - name: Docker login
+        run: echo "${{ env.DOCKERHUB_TOKEN }}" | docker login --username ${{ env.DOCKERHUB_USERNAME }} --password-stdin
+      - name: Build and push (multi-arch)
         run: |
-          echo ${{ env.DOCKERHUB_TOKEN }} | docker login --username ${{ env.DOCKERHUB_USERNAME }} --password-stdin
-          docker buildx build --platform linux/amd64 --push \
-            -t ${{ env.DOCKER_REPOSITORY }}:${{ needs.init-and-test.outputs.short_sha }} \
+          docker buildx build --platform linux/amd64,linux/arm64 --push \
             -t ${{ env.DOCKER_REPOSITORY }}:${{ needs.init-and-test.outputs.full_sha }} \
+            -t ${{ env.DOCKER_REPOSITORY }}:${{ needs.init-and-test.outputs.short_sha }} \
             .
           echo "build successful: ${{ needs.init-and-test.outputs.short_sha }}"
 
+  # EKS는 runner에서 직접 닿으므로 매니페스트를 git push하지 않고 kubectl apply로 바로 반영한다
   deploy:
     runs-on: ubuntu-latest
     needs: [init-and-test, build]
@@ -74,9 +82,10 @@ jobs:
       - name: Deploy to EKS
         run: |
           SHORT_SHA=${{ needs.init-and-test.outputs.short_sha }}
-          sed -i "s|image: .*worklog-backend:.*|image: ${{ env.DOCKER_REPOSITORY }}:${SHORT_SHA}|" deploy_manifest/worklog-backend.yaml
-          sed -i "s|value: .*# IMAGE_TAG|value: \"${SHORT_SHA}\" # IMAGE_TAG|" deploy_manifest/worklog-backend.yaml
-          kubectl apply -f deploy_manifest/worklog-backend.yaml
+          cd deploy_manifest
+          sed -i "s|image: .*/worklog-backend:.*|image: ${{ env.DOCKER_REPOSITORY }}:${SHORT_SHA}|" worklog-backend.yaml
+          sed -i "s|value: .* # IMAGE_TAG|value: \"${SHORT_SHA}\" # IMAGE_TAG|" worklog-backend.yaml
+          kubectl apply -f worklog-backend.yaml
           kubectl rollout status deployment/worklog-backend --timeout=120s
           echo "Deploy to EKS completed for tag ${SHORT_SHA}"
 
@@ -88,6 +97,7 @@ jobs:
       - name: Notification Success
         run: |
           echo "EKS deploy completed successfully"
+          echo "Branch: ${{ needs.init-and-test.outputs.branch }}"
           echo "Commit: ${{ needs.init-and-test.outputs.commit_message }}"
           echo "Tags: ${{ needs.init-and-test.outputs.short_sha }}"
 
@@ -99,5 +109,6 @@ jobs:
       - name: Notification Failure
         run: |
           echo "EKS deploy failed"
+          echo "Branch: ${{ needs.init-and-test.outputs.branch }}"
           echo "Commit: ${{ needs.init-and-test.outputs.commit_message }}"
           echo "Tags: ${{ needs.init-and-test.outputs.short_sha }}"
