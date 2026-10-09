@@ -1,0 +1,143 @@
+name: worklog backend EKS + Argo CD pipeline
+concurrency:
+  group: worklog-deploy-${{ github.ref }}
+  cancel-in-progress: false
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - 'deploy_manifest/**'
+
+permissions:
+  contents: write
+
+env:
+  DOCKER_REPOSITORY: sysnet4admin/worklog-backend
+  DOCKERHUB_USERNAME: sysnet4admin
+  DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+  AWS_REGION: ${{ secrets.AWS_REGION }}
+  EKS_CLUSTER_NAME: ${{ secrets.EKS_CLUSTER_NAME }}
+  ARGOCD_APP_NAME: worklog-backend
+
+jobs:
+  init-and-test:
+    runs-on: ubuntu-latest
+    outputs:
+      full_sha: ${{ steps.vars.outputs.full_sha }}
+      short_sha: ${{ steps.vars.outputs.short_sha }}
+      branch: ${{ steps.vars.outputs.branch }}
+      commit_message: ${{ steps.vars.outputs.commit_message }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: '3.14'
+      - id: vars
+        name: Init variables
+        run: |
+          full_sha=${{ github.sha }}
+          short_sha=$(echo ${full_sha} | cut -c1-8)
+          branch=${GITHUB_REF_NAME}
+          commit_message=$(git log -1 --format="*%s* by _%an_")
+          echo "full_sha=${full_sha}" >> $GITHUB_OUTPUT
+          echo "short_sha=${short_sha}" >> $GITHUB_OUTPUT
+          echo "branch=${branch}" >> $GITHUB_OUTPUT
+          echo "commit_message=${commit_message}" >> $GITHUB_OUTPUT
+      - name: Run test
+        run: |
+          uv sync --extra dev
+          export TESTING=true
+          uv run coverage run --source ./src/worklog -m pytest --disable-warnings -v
+          uv run coverage report
+
+  build:
+    runs-on: ubuntu-latest
+    needs: [init-and-test]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+      - name: Docker login
+        run: echo "${{ env.DOCKERHUB_TOKEN }}" | docker login --username ${{ env.DOCKERHUB_USERNAME }} --password-stdin
+      - name: Build and push (multi-arch)
+        run: |
+          docker buildx build --platform linux/amd64,linux/arm64 --push \
+            -t ${{ env.DOCKER_REPOSITORY }}:${{ needs.init-and-test.outputs.full_sha }} \
+            -t ${{ env.DOCKER_REPOSITORY }}:${{ needs.init-and-test.outputs.short_sha }} \
+            .
+          echo "build successful: ${{ needs.init-and-test.outputs.short_sha }}"
+
+  # 매니페스트를 고쳐 같은 브랜치에 push하고, Argo CD가 그 커밋을 클러스터에 반영하게 한다
+  deploy:
+    runs-on: ubuntu-latest
+    needs: [init-and-test, build]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+      - name: Update kubeconfig
+        run: |
+          aws eks update-kubeconfig --region ${{ env.AWS_REGION }} --name ${{ env.EKS_CLUSTER_NAME }}
+      - name: Install Argo CD CLI
+        run: |
+          curl -sSL -o argocd https://github.com/argoproj/argo-cd/releases/download/v3.4.3/argocd-linux-amd64
+          chmod +x argocd
+          sudo mv argocd /usr/local/bin/argocd
+      # NLB hostname은 클러스터를 다시 만들면 바뀌므로 Secret에 두지 않고 매번 조회한다
+      - name: Get Argo CD server address
+        run: |
+          ARGOCD_SERVER=$(kubectl get svc argocd-server -n argocd -o jsonpath='{.status.loadBalancer.ingress[0].hostname}')
+          if [[ -z "${ARGOCD_SERVER}" ]]; then
+            echo "argocd-server LoadBalancer hostname not found"
+            exit 1
+          fi
+          echo "ARGOCD_SERVER=${ARGOCD_SERVER}" >> $GITHUB_ENV
+      - name: Update manifest and push
+        run: |
+          SHORT_SHA=${{ needs.init-and-test.outputs.short_sha }}
+          BRANCH=${{ needs.init-and-test.outputs.branch }}
+          sed -i "s|image: .*/worklog-backend:.*|image: ${{ env.DOCKER_REPOSITORY }}:${SHORT_SHA}|" deploy_manifest/worklog-backend.yaml
+          sed -i "s|value: .* # IMAGE_TAG|value: \"${SHORT_SHA}\" # IMAGE_TAG|" deploy_manifest/worklog-backend.yaml
+          git config user.name "github-actions"
+          git config user.email "github-actions@github.com"
+          git add deploy_manifest/
+          git diff --staged --quiet || git commit -m "deploy: update image tag to ${SHORT_SHA}"
+          git pull --rebase -X theirs origin "${BRANCH}"
+          git push origin HEAD:${BRANCH}
+      - name: Sync Argo CD Application
+        env:
+          ARGOCD_ADMIN_PASSWORD: ${{ secrets.ARGOCD_ADMIN_PASSWORD }}
+        run: |
+          argocd login ${ARGOCD_SERVER} --username admin --password ${ARGOCD_ADMIN_PASSWORD} --plaintext
+          argocd app sync ${ARGOCD_APP_NAME}
+          argocd app wait ${ARGOCD_APP_NAME} --health --timeout 120
+          echo "Argo CD sync completed for ${ARGOCD_APP_NAME}"
+
+  notify-success-result:
+    if: ${{ success() }}
+    runs-on: ubuntu-latest
+    needs: [init-and-test, build, deploy]
+    steps:
+      - name: Notification Success
+        run: |
+          echo "EKS + Argo CD pipeline completed successfully"
+          echo "Branch: ${{ needs.init-and-test.outputs.branch }}"
+          echo "Commit: ${{ needs.init-and-test.outputs.commit_message }}"
+          echo "Tags: ${{ needs.init-and-test.outputs.short_sha }}"
+
+  notify-failure-result:
+    if: ${{ failure() }}
+    runs-on: ubuntu-latest
+    needs: [init-and-test, build, deploy]
+    steps:
+      - name: Notification Failure
+        run: |
+          echo "EKS + Argo CD pipeline failed"
+          echo "Branch: ${{ needs.init-and-test.outputs.branch }}"
+          echo "Commit: ${{ needs.init-and-test.outputs.commit_message }}"
+          echo "Tags: ${{ needs.init-and-test.outputs.short_sha }}"
