@@ -1,66 +1,80 @@
-name: Backend Build and Deploy
-concurrency:
-  group: worklog-deploy-${{ github.ref }}
-  cancel-in-progress: false
+name: worklog backend build-deploy
 
 on:
   push:
-    branches: [main]
+    branches:
+      - main
     paths-ignore:
       - 'deploy_manifest/**'
 
 permissions:
   contents: write
 
+concurrency:
+  group: worklog-build-deploy-${{ github.ref }}
+  cancel-in-progress: false
+
 env:
-  IMAGE_NAME: worklog-backend
+  IMAGE: ${{ secrets.DOCKERHUB_USERNAME }}/worklog-backend
 
 jobs:
   test:
     runs-on: ubuntu-latest
+    outputs:
+      short_sha: ${{ steps.vars.outputs.short_sha }}
     steps:
       - uses: actions/checkout@v4
+      - id: vars
+        name: Set image tag
+        run: echo "short_sha=${GITHUB_SHA::8}" >> "$GITHUB_OUTPUT"
       - name: Install uv
-        run: curl -LsSf https://astral.sh/uv/0.11.18/install.sh | sh
-      - name: Run tests
         run: |
-          export PATH="$HOME/.local/bin:$PATH"
-          uv sync --extra dev
-          TESTING=true uv run coverage run --source ./src/worklog -m pytest --disable-warnings -v
+          curl -LsSf https://astral.sh/uv/0.11.18/install.sh | sh
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+      - name: Install dependencies
+        run: uv sync --extra dev
+      - name: Run test with coverage
+        env:
+          TESTING: "true"
+        run: |
+          uv run coverage run --source ./src/worklog -m pytest --disable-warnings -v
           uv run coverage report
 
   build:
-    needs: test
     runs-on: ubuntu-latest
-    outputs:
-      image_tag: ${{ steps.vars.outputs.image_tag }}
+    needs: [test]
     steps:
       - uses: actions/checkout@v4
-      - name: Set image tag
-        id: vars
-        run: echo "image_tag=$(git rev-parse --short=8 HEAD)" >> $GITHUB_OUTPUT
-      - name: Docker login
-        run: echo "${{ secrets.DOCKERHUB_TOKEN }}" | docker login -u "${{ secrets.DOCKERHUB_USERNAME }}" --password-stdin
-      - name: Build and push (multi-arch)
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      - name: Log in to Docker Hub
         run: |
-          docker run --privileged --rm tonistiigi/binfmt --install all
-          docker buildx create --use --name builder
-          docker buildx build --platform linux/amd64,linux/arm64 \
-            -t ${{ secrets.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}:${{ steps.vars.outputs.image_tag }} \
-            --push .
+          echo "${{ secrets.DOCKERHUB_TOKEN }}" | docker login --username "${{ secrets.DOCKERHUB_USERNAME }}" --password-stdin
+      - name: Build and push image
+        run: |
+          docker buildx build . \
+            --platform linux/amd64,linux/arm64 \
+            -t "${IMAGE}:${{ needs.test.outputs.short_sha }}" \
+            --push
 
   deploy:
-    needs: build
     runs-on: ubuntu-latest
+    needs: [test, build]
     steps:
       - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
       - name: Update manifest and push
+        env:
+          TAG: ${{ needs.test.outputs.short_sha }}
         run: |
-          sed -i "s|image: .*/worklog-backend:.*|image: ${{ secrets.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}:${{ needs.build.outputs.image_tag }}|" deploy_manifest/worklog-backend.yaml
-          sed -i "s|value: .* # IMAGE_TAG|value: \"${{ needs.build.outputs.image_tag }}\" # IMAGE_TAG|" deploy_manifest/worklog-backend.yaml
+          sed -i "s|image: .*worklog-backend:.*|image: ${IMAGE}:${TAG}|" deploy_manifest/worklog-backend.yaml
+          sed -i "s|value: .* # IMAGE_TAG|value: \"${TAG}\" # IMAGE_TAG|" deploy_manifest/worklog-backend.yaml
           git config user.name "github-actions"
-          git config user.email "actions@github.com"
-          git add deploy_manifest/
-          git diff --staged --quiet || git commit -m "deploy: update backend image to ${{ needs.build.outputs.image_tag }}"
+          git config user.email "github-actions@github.com"
+          git add deploy_manifest/worklog-backend.yaml
+          git commit -m "deploy: update image tag to ${TAG}"
           git pull --rebase -X theirs origin main
           git push origin main
