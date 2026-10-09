@@ -35,7 +35,7 @@ pipeline {
         stage('Run Test') {
             steps {
                 sh '''
-                    curl -LsSf https://astral.sh/uv/install.sh | sh
+                    curl -LsSf https://astral.sh/uv/0.11.18/install.sh | sh
                     export PATH="$HOME/.local/bin:$PATH"
                     uv sync --extra dev
                     TESTING=true uv run coverage run --source ./src/worklog -m pytest --disable-warnings -v
@@ -86,7 +86,7 @@ pipeline {
                     sh """
                         ARCH=\$(uname -m)
                         if [ "\$ARCH" = "aarch64" ] || [ "\$ARCH" = "arm64" ]; then BIN="argocd-linux-arm64"; else BIN="argocd-linux-amd64"; fi
-                        curl -sSL -o /tmp/argocd https://github.com/argoproj/argo-cd/releases/latest/download/\$BIN
+                        curl -sSL -o /tmp/argocd https://github.com/argoproj/argo-cd/releases/download/v3.4.3/\$BIN
                         chmod +x /tmp/argocd
                         /tmp/argocd login ${ARGOCD_SERVER} \\
                             --username admin \\
