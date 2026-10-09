@@ -21,6 +21,10 @@ pipeline {
         AWS_SECRET_ACCESS_KEY = credentials('aws-secret-access-key')
         AWS_REGION = 'ap-southeast-2'   // 10.3 단계 4에서 정한 리전
         EKS_CLUSTER_NAME = 'cicd-learning-eks'
+        // Username with password 타입이라 GITHUB_CREDENTIALS_USR, GITHUB_CREDENTIALS_PSW가 함께 생긴다.
+        GITHUB_CREDENTIALS = credentials('github-token')
+        ARGOCD_ADMIN_PASSWORD = credentials('argocd-admin-password')
+        ARGOCD_APP_NAME = 'worklog-backend'
     }
 
     stages {
@@ -77,16 +81,43 @@ pipeline {
             }
         }
 
-        stage('Deploy to EKS') {
-            // 매니페스트를 Git에 push하지 않는다. 워크스페이스 사본만 고쳐 EKS에 바로 적용한다.
+        stage('Update Manifest') {
+            // kubectl apply를 직접 하지 않는다. 매니페스트의 태그를 고쳐 Git에 push하면 Argo CD가 그 커밋을 배포한다.
+            // 태그 빌드에서는 BRANCH_NAME에 태그 이름이 들어가 push가 거절된다. 이 파이프라인은 브랜치 빌드용이다.
             steps {
                 sh '''
-                    cd deploy_manifest
-                    sed -i "s|image: .*/worklog-backend:.*|image: $DOCKER_REPOSITORY:$SHORT_SHA|" worklog-backend.yaml
-                    sed -i "s|value: .* # IMAGE_TAG|value: \\"$SHORT_SHA\\" # IMAGE_TAG|" worklog-backend.yaml
-                    kubectl apply -f worklog-backend.yaml
-                    kubectl rollout status deployment/worklog-backend --timeout=180s
-                    echo "Deploy to EKS completed for tag $SHORT_SHA"
+                    sed -i "s|image: .*/worklog-backend:.*|image: $DOCKER_REPOSITORY:$SHORT_SHA|" deploy_manifest/worklog-backend.yaml
+                    sed -i "s|value: .* # IMAGE_TAG|value: \\"$SHORT_SHA\\" # IMAGE_TAG|" deploy_manifest/worklog-backend.yaml
+                    git config user.name "jenkins"
+                    git config user.email "jenkins@myk8s.local"
+                    git remote set-url origin "https://$GITHUB_CREDENTIALS_USR:$GITHUB_CREDENTIALS_PSW@github.com/sysnet4admin/worklog-backend.git"
+                    git add deploy_manifest/
+                    git diff --staged --quiet || git commit -m "deploy: update image tag to $SHORT_SHA"
+                    git pull --rebase origin "$BRANCH_NAME" || git rebase --abort
+                    git push origin "HEAD:$BRANCH_NAME"
+                    echo "manifest pushed: $SHORT_SHA"
+                '''
+            }
+        }
+
+        stage('Sync Argo CD') {
+            // EKS의 Argo CD는 LoadBalancer로 노출돼 있어 에이전트에서 주소로 바로 닿는다.
+            // 10.5의 Argo CD는 TLS 없이 동작하므로 --plaintext를 쓴다(--insecure가 아니다).
+            steps {
+                script {
+                    env.ARGOCD_SERVER = sh(
+                        script: "kubectl get svc argocd-server -n argocd -o jsonpath='{.status.loadBalancer.ingress[0].hostname}'",
+                        returnStdout: true
+                    ).trim()
+                    if (!env.ARGOCD_SERVER) {
+                        error 'argocd-server LoadBalancer 주소가 비어 있다. 10.5의 Argo CD Service 타입을 확인한다.'
+                    }
+                }
+                sh '''
+                    argocd login "$ARGOCD_SERVER" --username admin --password "$ARGOCD_ADMIN_PASSWORD" --plaintext
+                    argocd app sync "$ARGOCD_APP_NAME"
+                    argocd app wait "$ARGOCD_APP_NAME" --health --timeout 120
+                    echo "Argo CD sync completed for $ARGOCD_APP_NAME"
                 '''
             }
         }
