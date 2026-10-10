@@ -8,25 +8,33 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
+    outputs:
+      result: ${{ steps.run-test.outputs.result }}
     steps:
       - uses: actions/checkout@v4
       - name: Run test
+        id: run-test
         run: |
           echo "let's run a test"
+          echo "result=passed" >> "$GITHUB_OUTPUT"
   build:
     runs-on: ubuntu-latest
     needs: ["test"]
+    outputs:
+      image: ${{ steps.build-image.outputs.image }}
     steps:
       - uses: actions/checkout@v4
       - name: Build image
+        id: build-image
         run: |
+          echo "test result: ${{ needs.test.outputs.result }}"
           echo "Let's build the image"
-          exit 1
+          echo "image=worklog-backend:${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
   deploy:
     runs-on: ubuntu-latest
-    needs: ["test", "build"]
+    needs: ["build"]
     steps:
       - uses: actions/checkout@v4
       - name: Deploy image
         run: |
-          echo "Let's deploy the image"
+          echo "Let's deploy the image: ${{ needs.build.outputs.image }}"
