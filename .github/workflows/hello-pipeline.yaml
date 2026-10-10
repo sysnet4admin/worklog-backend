@@ -21,6 +21,7 @@ jobs:
       - name: Build image
         run: |
           echo "Let's build the image"
+          exit 1
   deploy:
     runs-on: ubuntu-latest
     needs: ["test", "build"]
