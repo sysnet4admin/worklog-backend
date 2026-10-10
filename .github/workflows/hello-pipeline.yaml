@@ -30,6 +30,7 @@ jobs:
           echo "test result: ${{ needs.test.outputs.result }}"
           echo "Let's build the image"
           echo "image=worklog-backend:${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+          exit 1
   deploy:
     runs-on: ubuntu-latest
     needs: ["build"]
@@ -38,3 +39,19 @@ jobs:
       - name: Deploy image
         run: |
           echo "Let's deploy the image: ${{ needs.build.outputs.image }}"
+  notify-success:
+    runs-on: ubuntu-latest
+    needs: ["build"]
+    if: ${{ success() }}
+    steps:
+      - name: Notify success
+        run: |
+          echo "SUCCESS: ${{ needs.build.outputs.image }}"
+  notify-failure:
+    runs-on: ubuntu-latest
+    needs: ["build"]
+    if: ${{ failure() }}
+    steps:
+      - name: Notify failure
+        run: |
+          echo "FAILURE: build result is ${{ needs.build.result }}"
