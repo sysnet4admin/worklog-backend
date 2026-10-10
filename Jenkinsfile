@@ -4,7 +4,11 @@ def notify(String result) {
 
 pipeline {
     // label은 ch4.5 jenkins-config.yaml의 podTemplate label과 일치해야 한다.
+    // docker.build()와 withRegistry()는 docker.sock을 가진 이 k8s 에이전트에서만 동작한다.
     agent { label 'jenkins-jenkins-agent' }
+    environment {
+        DOCKER_REPOSITORY = 'sysnet4admin/worklog-backend'
+    }
     stages {
         stage('Run Test') {
             steps {
@@ -22,7 +26,20 @@ pipeline {
         }
         stage('Build Image') {
             steps {
-                echo "Let's build the image: ${env.IMAGE_TAG}"
+                script {
+                    def fullSHA = sh(script: "git log -n 1 --pretty=format:'%H'", returnStdout: true).trim()
+                    def shortSHA = fullSHA[0..8]
+                    echo "Let's build the image: ${DOCKER_REPOSITORY}:${shortSHA}"
+
+                    def app = docker.build("${DOCKER_REPOSITORY}:${shortSHA}")
+
+                    docker.withRegistry('https://index.docker.io/v1/', 'dockerhub-credentials') {
+                        app.push("${shortSHA}")
+                        app.push("${fullSHA}")
+                    }
+
+                    echo "Tags: ${shortSHA}, ${fullSHA}"
+                }
             }
         }
         stage('Deploy Image') {
