@@ -43,6 +43,17 @@ pipeline {
                 }
             }
         }
+        stage('Lint') {
+            when { expression { env.SKIP_BUILD != 'true' } }
+            steps {
+                sh '''
+                    curl -LsSf https://astral.sh/uv/0.11.18/install.sh | sh
+                    export PATH="$HOME/.local/bin:$PATH"
+                    uv sync --extra dev
+                    uv run ruff check src/
+                '''
+            }
+        }
         stage('Test') {
             when { expression { env.SKIP_BUILD != 'true' } }
             steps {
