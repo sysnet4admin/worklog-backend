@@ -110,6 +110,20 @@ pipeline {
                 '''
             }
         }
+        stage('Image Scan') {
+            when { expression { env.SKIP_BUILD != 'true' } }
+            steps {
+                // Build stage가 push한 이미지를 검사한다. 이 stage가 실패하면 Update Manifest까지 가지 않는다.
+                // 에이전트 사용자는 /usr/local/bin에 쓸 수 없어 /tmp에 설치한다.
+                sh '''
+                    TRIVY_VERSION=v0.75.0
+                    curl -sfL "https://raw.githubusercontent.com/aquasecurity/trivy/${TRIVY_VERSION}/contrib/install.sh" \\
+                        | sh -s -- -b /tmp "${TRIVY_VERSION}"
+                    /tmp/trivy image --exit-code 1 --severity CRITICAL,HIGH --ignore-unfixed --format table \\
+                        "$DOCKER_REPOSITORY:$IMAGE_TAG"
+                '''
+            }
+        }
         stage('Update Manifest') {
             when { expression { env.SKIP_BUILD != 'true' } }
             steps {
