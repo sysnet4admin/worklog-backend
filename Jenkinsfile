@@ -1,3 +1,7 @@
+def notify(String result) {
+    echo "알림: ${env.JOB_NAME} #${env.BUILD_NUMBER} 빌드가 ${result}"
+}
+
 pipeline {
     agent any
     stages {
@@ -22,10 +26,10 @@ pipeline {
     }
     post {
         success {
-            echo "알림: ${env.JOB_NAME} #${env.BUILD_NUMBER} 빌드가 성공했습니다"
+            notify('성공했습니다')
         }
         failure {
-            echo "알림: ${env.JOB_NAME} #${env.BUILD_NUMBER} 빌드가 실패했습니다"
+            notify('실패했습니다')
         }
     }
 }
