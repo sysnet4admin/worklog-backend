@@ -4,17 +4,19 @@ pipeline {
         stage('Run Test') {
             steps {
                 echo "Let's run a test"
+                script {
+                    env.IMAGE_TAG = "build-${env.BUILD_NUMBER}"
+                }
             }
         }
         stage('Build Image') {
             steps {
-                echo "Let's build the image"
-                error("Build Image 단계를 일부러 실패시킵니다")
+                echo "Let's build the image: ${env.IMAGE_TAG}"
             }
         }
         stage('Deploy Image') {
             steps {
-                echo "Let's deploy the image"
+                echo "Let's deploy the image: ${env.IMAGE_TAG}"
             }
         }
     }
