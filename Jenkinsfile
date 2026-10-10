@@ -3,7 +3,8 @@ def notify(String result) {
 }
 
 pipeline {
-    agent any
+    // label은 ch4.5 jenkins-config.yaml의 podTemplate label과 일치해야 한다.
+    agent { label 'jenkins-jenkins-agent' }
     stages {
         stage('Run Test') {
             steps {
@@ -11,6 +12,12 @@ pipeline {
                 script {
                     env.IMAGE_TAG = "build-${env.BUILD_NUMBER}"
                 }
+                // 에이전트 pod에 uv를 직접 설치해 테스트 환경을 준비한다.
+                sh '''
+                    curl -LsSf https://astral.sh/uv/0.11.18/install.sh | sh
+                    export PATH=$HOME/.local/bin:$PATH
+                    uv sync --extra dev
+                '''
             }
         }
         stage('Build Image') {
