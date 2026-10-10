@@ -22,25 +22,30 @@ pipeline {
                         return
                     }
                     env.SHORT_SHA = sh(script: 'git rev-parse --short=8 HEAD', returnStdout: true).trim()
+                    env.COMMIT_MESSAGE = sh(script: 'git log -1 --pretty=%B', returnStdout: true).trim()
                     if (env.TAG_NAME) {
                         // 태그 빌드는 BRANCH_NAME에도 태그 이름이 들어와 태그에는 push할 수 없다. main에 push한다.
                         env.TARGET_ENV = 'prod'
                         env.NAMESPACE = 'prod'
                         env.IMAGE_TAG = env.TAG_NAME
+                        env.ARGOCD_APP = 'worklog-backend-prod'
                         env.PUSH_BRANCH = 'main'
                     } else if (env.BRANCH_NAME.startsWith('release/')) {
                         env.TARGET_ENV = 'staging'
                         env.NAMESPACE = 'staging'
                         env.IMAGE_TAG = "staging-${env.SHORT_SHA}"
+                        env.ARGOCD_APP = 'worklog-backend-staging'
                         env.PUSH_BRANCH = env.BRANCH_NAME
                     } else {
                         // develop과 그 외 브랜치
                         env.TARGET_ENV = 'dev'
                         env.NAMESPACE = 'dev'
                         env.IMAGE_TAG = "dev-${env.SHORT_SHA}"
+                        env.ARGOCD_APP = 'worklog-backend-dev'
                         env.PUSH_BRANCH = env.BRANCH_NAME
                     }
-                    echo "TARGET_ENV=${env.TARGET_ENV} NAMESPACE=${env.NAMESPACE} IMAGE_TAG=${env.IMAGE_TAG}"
+                    echo "TARGET_ENV=${env.TARGET_ENV} NAMESPACE=${env.NAMESPACE} IMAGE_TAG=${env.IMAGE_TAG} ARGOCD_APP=${env.ARGOCD_APP}"
+                    echo "COMMIT_MESSAGE=${env.COMMIT_MESSAGE}"
                 }
             }
         }
@@ -67,6 +72,7 @@ pipeline {
                     echo "$DOCKERHUB_CREDENTIALS_PSW" | docker login --username "$DOCKERHUB_CREDENTIALS_USR" --password-stdin
                     docker buildx build --platform linux/amd64,linux/arm64 \
                         -t "$DOCKER_REPOSITORY:$IMAGE_TAG" \
+                        -t "$DOCKER_REPOSITORY:$SHORT_SHA" \
                         --push .
                 '''
             }
@@ -74,6 +80,7 @@ pipeline {
         stage('Update Manifest') {
             when { expression { env.SKIP_BUILD != 'true' } }
             steps {
+                // argocd CLI를 호출하지 않는다. push 뒤의 배포는 Argo CD automated sync가 맡는다.
                 sh '''
                     git rebase --abort 2>/dev/null || true
                     sed -i "s|image: .*worklog-backend:.*|image: $DOCKER_REPOSITORY:$IMAGE_TAG|" deploy_manifest/worklog-backend.yaml
@@ -91,10 +98,10 @@ pipeline {
     }
     post {
         success {
-            echo "알림: ${env.JOB_NAME} #${env.BUILD_NUMBER} ${env.TARGET_ENV} 배포가 성공했습니다"
+            echo "알림: ${env.JOB_NAME} #${env.BUILD_NUMBER} ${env.ARGOCD_APP}(${env.TARGET_ENV}) 매니페스트를 push했습니다. 배포는 Argo CD automated sync가 진행합니다"
         }
         failure {
-            echo "알림: ${env.JOB_NAME} #${env.BUILD_NUMBER} ${env.TARGET_ENV} 배포가 실패했습니다"
+            echo "알림: ${env.JOB_NAME} #${env.BUILD_NUMBER} ${env.ARGOCD_APP}(${env.TARGET_ENV}) 배포가 실패했습니다"
         }
     }
 }
