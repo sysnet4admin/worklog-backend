@@ -41,3 +41,20 @@ jobs:
         uses: gitleaks/gitleaks-action@v2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  test:
+    runs-on: ubuntu-latest
+    needs: [security-scan]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          version: "0.11.18"
+          python-version: '3.14'
+      - name: Run test with coverage
+        env:
+          TESTING: "true"
+        run: |
+          uv sync --extra dev
+          uv run coverage run --source ./src/worklog -m pytest --disable-warnings -v
+          uv run coverage report --fail-under=80
