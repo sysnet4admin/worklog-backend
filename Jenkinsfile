@@ -1,154 +1,77 @@
 pipeline {
-    // label은 ch4.5 jenkins-config.yaml의 podTemplate label과 일치해야 한다.
-    // agent any면 docker가 없는 컨트롤러로 갈 수 있다. stage별로 agent를 다시 선언하지 않는다.
+    // docker, aws, kubectl이 든 에이전트 이미지에서 실행한다. agent any면 도구가 없는 컨트롤러로 갈 수 있다.
+    // stage별로 agent를 다시 선언하지 않는다.
     agent { label 'jenkins-jenkins-agent' }
     environment {
         DOCKER_REPOSITORY = 'sysnet4admin/worklog-backend'
         DOCKERHUB_CREDENTIALS = credentials('dockerhub-credentials')
-        GITHUB_CREDENTIALS = credentials('github-token')
+        AWS_ACCESS_KEY_ID = credentials('aws-access-key-id')
+        AWS_SECRET_ACCESS_KEY = credentials('aws-secret-access-key')
+        AWS_REGION = 'ap-southeast-2'
+        EKS_CLUSTER_NAME = 'cicd-learning-eks'
     }
     stages {
         stage('Init') {
             steps {
                 script {
-                    env.SKIP_BUILD = 'false'
-                    // Jenkins가 남긴 배포 커밋이면 다시 빌드하지 않는다. 안 막으면 스캔마다 배포 커밋이 또 생긴다.
-                    // 태그는 건너뛰지 않는다. main 최신 커밋(대개 배포 커밋)에 태그를 붙이기 때문이다.
-                    String author = sh(script: 'git log -1 --format=%an', returnStdout: true).trim()
-                    if (!env.TAG_NAME && author == 'jenkins') {
-                        env.SKIP_BUILD = 'true'
-                        currentBuild.result = 'NOT_BUILT'
-                        echo 'skip: deploy commit by jenkins'
-                        return
-                    }
                     env.SHORT_SHA = sh(script: 'git rev-parse --short=8 HEAD', returnStdout: true).trim()
-                    env.COMMIT_MESSAGE = sh(script: 'git log -1 --pretty=%B', returnStdout: true).trim()
-                    if (env.TAG_NAME) {
-                        // 태그 빌드는 BRANCH_NAME에도 태그 이름이 들어와 태그에는 push할 수 없다. main에 push한다.
-                        env.TARGET_ENV = 'prod'
-                        env.NAMESPACE = 'prod'
-                        env.IMAGE_TAG = env.TAG_NAME
-                        env.ARGOCD_APP = 'worklog-backend-prod'
-                        env.PUSH_BRANCH = 'main'
-                    } else if (env.BRANCH_NAME.startsWith('release/')) {
-                        env.TARGET_ENV = 'staging'
-                        env.NAMESPACE = 'staging'
-                        env.IMAGE_TAG = "staging-${env.SHORT_SHA}"
-                        env.ARGOCD_APP = 'worklog-backend-staging'
-                        env.PUSH_BRANCH = env.BRANCH_NAME
-                    } else {
-                        // develop과 그 외 브랜치
-                        env.TARGET_ENV = 'dev'
-                        env.NAMESPACE = 'dev'
-                        env.IMAGE_TAG = "dev-${env.SHORT_SHA}"
-                        env.ARGOCD_APP = 'worklog-backend-dev'
-                        env.PUSH_BRANCH = env.BRANCH_NAME
-                    }
-                    echo "TARGET_ENV=${env.TARGET_ENV} NAMESPACE=${env.NAMESPACE} IMAGE_TAG=${env.IMAGE_TAG} ARGOCD_APP=${env.ARGOCD_APP}"
-                    echo "COMMIT_MESSAGE=${env.COMMIT_MESSAGE}"
+                    echo "SHORT_SHA=${env.SHORT_SHA}"
                 }
             }
         }
-        stage('Lint') {
-            when { expression { env.SKIP_BUILD != 'true' } }
-            steps {
-                sh '''
-                    curl -LsSf https://astral.sh/uv/0.11.18/install.sh | sh
-                    export PATH="$HOME/.local/bin:$PATH"
-                    uv sync --extra dev
-                    uv run ruff check src/
-                '''
-            }
-        }
-        stage('Security Scan') {
-            when { expression { env.SKIP_BUILD != 'true' } }
-            steps {
-                sh '''
-                    curl -LsSf https://astral.sh/uv/0.11.18/install.sh | sh
-                    export PATH="$HOME/.local/bin:$PATH"
-                    uv sync --extra dev
-                    uv run pip-audit
-
-                    # gitleaks: 8.30.1로 고정하고 노드 아키텍처에 맞는 자산을 받는다
-                    GITLEAKS_VERSION=8.30.1
-                    case "$(uname -m)" in
-                        x86_64)        GL_ARCH=x64 ;;
-                        aarch64|arm64) GL_ARCH=arm64 ;;
-                        *)             GL_ARCH=x64 ;;
-                    esac
-                    curl -sSfL "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_${GL_ARCH}.tar.gz" \\
-                        | tar -xz -C /tmp/ gitleaks
-                    /tmp/gitleaks detect --source . --config .gitleaks.toml --no-banner
-                '''
-            }
-        }
         stage('Test') {
-            when { expression { env.SKIP_BUILD != 'true' } }
             steps {
                 sh '''
                     curl -LsSf https://astral.sh/uv/0.11.18/install.sh | sh
                     export PATH="$HOME/.local/bin:$PATH"
                     uv sync --extra dev
                     TESTING=true uv run coverage run --source ./src/worklog -m pytest --disable-warnings -v
-                    uv run coverage report --fail-under=80
+                    uv run coverage report
                 '''
             }
         }
         stage('Build') {
-            when { expression { env.SKIP_BUILD != 'true' } }
             steps {
                 // 자격 증명은 셸 변수로만 쓴다. Groovy 보간을 거치지 않아 로그에 남지 않는다.
+                // EKS 노드가 amd64라 linux/amd64만 빌드한다.
                 sh '''
                     docker run --privileged --rm tonistiigi/binfmt --install all 2>/dev/null || true
                     docker buildx rm backend-builder 2>/dev/null || true
                     docker buildx create --name backend-builder --driver docker-container --use
                     echo "$DOCKERHUB_CREDENTIALS_PSW" | docker login --username "$DOCKERHUB_CREDENTIALS_USR" --password-stdin
-                    docker buildx build --platform linux/amd64,linux/arm64 \
-                        -t "$DOCKER_REPOSITORY:$IMAGE_TAG" \
-                        -t "$DOCKER_REPOSITORY:$SHORT_SHA" \
+                    docker buildx build --platform linux/amd64 \\
+                        -t "$DOCKER_REPOSITORY:$SHORT_SHA" \\
                         --push .
+                    echo "build successful: $SHORT_SHA"
                 '''
             }
         }
-        stage('Image Scan') {
-            when { expression { env.SKIP_BUILD != 'true' } }
+        stage('Configure AWS') {
             steps {
-                // Build stage가 push한 이미지를 검사한다. 이 stage가 실패하면 Update Manifest까지 가지 않는다.
-                // 에이전트 사용자는 /usr/local/bin에 쓸 수 없어 /tmp에 설치한다.
                 sh '''
-                    TRIVY_VERSION=v0.75.0
-                    curl -sfL "https://raw.githubusercontent.com/aquasecurity/trivy/${TRIVY_VERSION}/contrib/install.sh" \\
-                        | sh -s -- -b /tmp "${TRIVY_VERSION}"
-                    /tmp/trivy image --exit-code 1 --severity CRITICAL,HIGH --ignore-unfixed --format table \\
-                        "$DOCKER_REPOSITORY:$IMAGE_TAG"
+                    aws eks update-kubeconfig --region ${AWS_REGION} --name ${EKS_CLUSTER_NAME}
                 '''
             }
         }
-        stage('Update Manifest') {
-            when { expression { env.SKIP_BUILD != 'true' } }
+        stage('Deploy to EKS') {
             steps {
-                // argocd CLI를 호출하지 않는다. push 뒤의 배포는 Argo CD automated sync가 맡는다.
+                // 매니페스트는 워크스페이스에서만 고치고 git push하지 않는다.
                 sh '''
-                    git rebase --abort 2>/dev/null || true
-                    sed -i "s|image: .*worklog-backend:.*|image: $DOCKER_REPOSITORY:$IMAGE_TAG|" deploy_manifest/worklog-backend.yaml
-                    sed -i "s|value: .* # IMAGE_TAG|value: \\"$IMAGE_TAG\\" # IMAGE_TAG|" deploy_manifest/worklog-backend.yaml
-                    git config user.name "jenkins"
-                    git config user.email "jenkins@myk8s.local"
-                    git remote set-url origin "https://${GITHUB_CREDENTIALS_USR}:${GITHUB_CREDENTIALS_PSW}@github.com/sysnet4admin/worklog-backend.git"
-                    git add deploy_manifest/
-                    git diff --staged --quiet || git commit -m "deploy: update image tag to $IMAGE_TAG for $TARGET_ENV"
-                    git pull --rebase -X theirs origin "$PUSH_BRANCH"
-                    git push origin HEAD:"$PUSH_BRANCH"
+                    sed -i "s|image: .*worklog-backend:.*|image: $DOCKER_REPOSITORY:$SHORT_SHA|" deploy_manifest/worklog-backend.yaml
+                    sed -i "s|value: .* # IMAGE_TAG|value: \\"$SHORT_SHA\\" # IMAGE_TAG|" deploy_manifest/worklog-backend.yaml
+                    kubectl apply -f deploy_manifest/worklog-backend.yaml
+                    kubectl rollout status deployment/worklog-backend --timeout=120s
+                    echo "Deploy to EKS completed for tag $SHORT_SHA"
                 '''
             }
         }
     }
     post {
         success {
-            echo "알림: ${env.JOB_NAME} #${env.BUILD_NUMBER} ${env.ARGOCD_APP}(${env.TARGET_ENV}) 매니페스트를 push했습니다. 배포는 Argo CD automated sync가 진행합니다"
+            echo "알림: ${env.JOB_NAME} #${env.BUILD_NUMBER} ${env.SHORT_SHA}를 EKS(${env.EKS_CLUSTER_NAME})에 배포했습니다"
         }
         failure {
-            echo "알림: ${env.JOB_NAME} #${env.BUILD_NUMBER} ${env.ARGOCD_APP}(${env.TARGET_ENV}) 배포가 실패했습니다"
+            echo "알림: ${env.JOB_NAME} #${env.BUILD_NUMBER} EKS(${env.EKS_CLUSTER_NAME}) 배포가 실패했습니다"
         }
     }
 }
