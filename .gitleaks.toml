@@ -1,0 +1,12 @@
+title = "worklog-backend gitleaks config"
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "스캔 제외 경로"
+paths = [
+  '''\.md$''',
+  '''(^|/)tests/''',
+  '''(^|/)deploy_manifest/''',
+]

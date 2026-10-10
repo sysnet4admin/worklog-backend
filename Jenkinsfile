@@ -54,6 +54,28 @@ pipeline {
                 '''
             }
         }
+        stage('Security Scan') {
+            when { expression { env.SKIP_BUILD != 'true' } }
+            steps {
+                sh '''
+                    curl -LsSf https://astral.sh/uv/0.11.18/install.sh | sh
+                    export PATH="$HOME/.local/bin:$PATH"
+                    uv sync --extra dev
+                    uv run pip-audit
+
+                    # gitleaks: 버전을 고정하고 노드 아키텍처에 맞는 바이너리를 받는다
+                    GITLEAKS_VERSION=8.30.1
+                    case "$(uname -m)" in
+                        x86_64)        GL_ARCH=x64 ;;
+                        aarch64|arm64) GL_ARCH=arm64 ;;
+                        *)             GL_ARCH=x64 ;;
+                    esac
+                    curl -sSfL "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_${GL_ARCH}.tar.gz" \\
+                        | tar -xz -C /tmp/ gitleaks
+                    /tmp/gitleaks detect --source . --config .gitleaks.toml --no-banner
+                '''
+            }
+        }
         stage('Test') {
             when { expression { env.SKIP_BUILD != 'true' } }
             steps {
