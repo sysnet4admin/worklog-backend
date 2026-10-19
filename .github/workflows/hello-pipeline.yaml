@@ -45,8 +45,8 @@ jobs:
         run: |
           echo "Let's build the image for ${{ needs.init-and-test.outputs.full_sha }}"
           echo "The change commit message to build is '${{ needs.init-and-test.outputs.commit_message }}'"
-          echo "build successful and published image with the following tags:"
-          echo "Tags: ${{ needs.init-and-test.outputs.short_sha }}, ${{ needs.init-and-test.outputs.full_sha }}"
+          echo "Oops, something went wrong with this build.."
+          exit 1
   deploy:
     runs-on: ubuntu-latest
     needs: [init-and-test, build]
@@ -55,3 +55,25 @@ jobs:
         run: |
           echo "Let's deploy the image"
           echo "Deploying our image ${{ needs.init-and-test.outputs.full_sha }} to the cluster"
+
+  notify-success-result:
+    if: ${{ success() }}
+    runs-on: ubuntu-latest
+    needs: [init-and-test, build, deploy]
+    steps:
+      - name: Slack Notification Success
+        run: |
+          echo "Your pipeline has been completed"
+          echo "Commit Message: ${{ needs.init-and-test.outputs.commit_message }}"
+          echo "Tags: ${{ needs.init-and-test.outputs.short_sha }}, ${{ needs.init-and-test.outputs.full_sha }}"
+
+  notify-failure-result:
+    if: ${{ failure() }}
+    runs-on: ubuntu-latest
+    needs: [init-and-test, build, deploy]
+    steps:
+      - name: Slack Notification Failure
+        run: |
+          echo "Your pipeline has been failed"
+          echo "Commit Message: ${{ needs.init-and-test.outputs.commit_message }}"
+          echo "Tags: ${{ needs.init-and-test.outputs.short_sha }}, ${{ needs.init-and-test.outputs.full_sha }}"
