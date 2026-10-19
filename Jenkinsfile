@@ -55,6 +55,26 @@ pipeline {
                 '''
             }
         }
+        stage('Security Scan') {
+            when { expression { env.SKIP_BUILD != 'true' } }
+            steps {
+                sh '''
+                    curl -LsSf https://astral.sh/uv/0.11.18/install.sh | sh
+                    export PATH="$HOME/.local/bin:$PATH"
+                    uv sync --extra dev
+                    uv run pip-audit
+
+                    case "$(uname -m)" in
+                        x86_64) GL_ARCH=x64 ;;
+                        aarch64) GL_ARCH=arm64 ;;
+                        *) echo "unsupported arch: $(uname -m)"; exit 1 ;;
+                    esac
+                    curl -fsSL "https://github.com/gitleaks/gitleaks/releases/download/v8.30.1/gitleaks_8.30.1_linux_${GL_ARCH}.tar.gz" \
+                        | tar -xz -C /tmp gitleaks
+                    /tmp/gitleaks detect --source . --config .gitleaks.toml --no-banner
+                '''
+            }
+        }
         stage('Test') {
             when { expression { env.SKIP_BUILD != 'true' } }
             steps {

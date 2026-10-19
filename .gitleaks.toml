@@ -1,0 +1,12 @@
+title = "worklog-backend gitleaks config"
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "예시 값이 많은 문서, 테스트, 매니페스트는 스캔하지 않는다"
+paths = [
+  '''\.md$''',
+  '''(^|/)tests/''',
+  '''(^|/)deploy_manifest/''',
+]
