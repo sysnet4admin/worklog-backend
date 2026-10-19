@@ -17,12 +17,15 @@ pipeline {
                     if (env.TAG_NAME?.startsWith('v')) {
                         env.TARGET_ENV = 'prod'
                         env.IMAGE_TAG = env.TAG_NAME
+                        env.ARGOCD_APP = 'worklog-backend-prod'
                     } else if (env.BRANCH_NAME.startsWith('release/')) {
                         env.TARGET_ENV = 'staging'
                         env.IMAGE_TAG = "staging-${env.SHORT_SHA}"
+                        env.ARGOCD_APP = 'worklog-backend-staging'
                     } else {
                         env.TARGET_ENV = 'dev'
                         env.IMAGE_TAG = "dev-${env.SHORT_SHA}"
+                        env.ARGOCD_APP = 'worklog-backend-dev'
                     }
 
                     // 태그 이름으로 push하면 already exists로 거절된다. prod Application이 보는 main에 올린다.
@@ -37,7 +40,7 @@ pipeline {
                         env.SKIP_BUILD = 'false'
                     }
 
-                    echo "TARGET_ENV=${env.TARGET_ENV} IMAGE_TAG=${env.IMAGE_TAG} PUSH_BRANCH=${env.PUSH_BRANCH}"
+                    echo "TARGET_ENV=${env.TARGET_ENV} ARGOCD_APP=${env.ARGOCD_APP} IMAGE_TAG=${env.IMAGE_TAG} PUSH_BRANCH=${env.PUSH_BRANCH}"
                 }
             }
         }
@@ -64,6 +67,7 @@ pipeline {
                     echo "\$DOCKERHUB_CREDENTIALS_PSW" | docker login --username "\$DOCKERHUB_CREDENTIALS_USR" --password-stdin
                     docker buildx build --platform linux/amd64,linux/arm64 \\
                         -t "\$DOCKERHUB_CREDENTIALS_USR/${IMAGE_NAME}:${env.IMAGE_TAG}" \\
+                        -t "\$DOCKERHUB_CREDENTIALS_USR/${IMAGE_NAME}:${env.SHORT_SHA}" \\
                         --push .
                 """
             }
@@ -84,6 +88,16 @@ pipeline {
                 """
                 echo "Manifest updated: ${env.TARGET_ENV} ${env.IMAGE_TAG} -> ${env.PUSH_BRANCH}"
             }
+        }
+    }
+    // 배포는 Argo CD 자동 sync가 한다. 배포 커밋을 건너뛴 빌드(NOT_BUILT)에는 알림이 뜨지 않는다.
+    post {
+        success {
+            echo "SUCCESS: TARGET_ENV=${env.TARGET_ENV} ARGOCD_APP=${env.ARGOCD_APP} IMAGE_TAG=${env.IMAGE_TAG}"
+            echo "Argo CD automated sync가 ${env.ARGOCD_APP}에 반영한다"
+        }
+        failure {
+            echo "FAILURE: TARGET_ENV=${env.TARGET_ENV} ARGOCD_APP=${env.ARGOCD_APP}"
         }
     }
 }
