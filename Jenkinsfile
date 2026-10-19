@@ -12,6 +12,9 @@ def sendSlackMessage(statusMessage, commitMessage, shortSHA, fullSHA) {
 pipeline {
     // 컨트롤러에는 uv와 docker가 없다. 4.5의 podTemplate으로 뜨는 쿠버네티스 에이전트에서 실행한다.
     agent { label 'jenkins-jenkins-agent' }
+    environment {
+        DOCKER_REPOSITORY = 'sysnet4admin/worklog-backend'
+    }
     stages {
         stage('Init Variables') {
             steps {
@@ -36,12 +39,22 @@ pipeline {
                 echo 'Test Passed!'
             }
         }
-        stage('Build Image') {
+        stage('Build and Push Image') {
             steps {
-                echo "Let's build the image for ${shortSHA} in ${branch}"
-                echo "The change commit message to build is '${commitMessage}'"
-                echo 'build successful and published image with the following tags:'
-                echo "Tags: ${shortSHA}, ${fullSHA}"
+                script {
+                    echo "Let's build the image for ${shortSHA} in ${branch}"
+                    echo "The change commit message to build is '${commitMessage}'"
+
+                    def app = docker.build("${DOCKER_REPOSITORY}:${shortSHA}")
+
+                    docker.withRegistry('https://index.docker.io/v1/', 'dockerhub-credentials') {
+                        app.push("${shortSHA}")
+                        app.push("${fullSHA}")
+                    }
+
+                    echo 'build successful and published image with the following tags:'
+                    echo "Tags: ${shortSHA}, ${fullSHA}"
+                }
             }
         }
     }
