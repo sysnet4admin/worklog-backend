@@ -26,8 +26,9 @@ jobs:
       environment: ${{ steps.env.outputs.environment }}
       image_tag: ${{ steps.env.outputs.image_tag }}
       branch: ${{ steps.env.outputs.branch }}
+      argocd_app: ${{ steps.env.outputs.argocd_app }}
     steps:
-      - name: Decide environment, image tag, target branch
+      - name: Decide environment, image tag, target branch, Argo CD app
         id: env
         env:
           EVENT_NAME: ${{ github.event_name }}
@@ -56,10 +57,13 @@ jobs:
             echo "Unsupported ref: $GITHUB_REF"
             exit 1
           fi
+          # 환경마다 Argo CD Application이 하나씩 있다(/root/ch8/2.argocd-apps-multi-env.yaml)
+          ARGOCD_APP="worklog-backend-${ENVIRONMENT}"
           echo "environment=$ENVIRONMENT" >> "$GITHUB_OUTPUT"
           echo "image_tag=$IMAGE_TAG" >> "$GITHUB_OUTPUT"
           echo "branch=$BRANCH" >> "$GITHUB_OUTPUT"
-          echo "environment=$ENVIRONMENT image_tag=$IMAGE_TAG branch=$BRANCH"
+          echo "argocd_app=$ARGOCD_APP" >> "$GITHUB_OUTPUT"
+          echo "environment=$ENVIRONMENT image_tag=$IMAGE_TAG branch=$BRANCH argocd_app=$ARGOCD_APP"
 
   test:
     needs: determine-environment
@@ -90,13 +94,17 @@ jobs:
 
       - name: Build and push (amd64, arm64)
         run: |
+          # 태그 2개: 환경 태그(매니페스트에 적힘)와 커밋 해시 앞 8자(어느 커밋의 이미지인지 추적)
+          SHORT_SHA="${GITHUB_SHA::8}"
           docker run --privileged --rm tonistiigi/binfmt --install all
           docker buildx create --use --name builder
           docker buildx build --platform linux/amd64,linux/arm64 \
             -t ${{ secrets.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}:${{ needs.determine-environment.outputs.image_tag }} \
+            -t ${{ secrets.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}:${SHORT_SHA} \
             --push .
 
-  deploy:
+  # 매니페스트만 고쳐 브랜치에 push한다. 배포는 그 브랜치를 보는 Argo CD Application이 자동 sync로 한다.
+  update-manifest:
     needs: [determine-environment, build]
     runs-on: ubuntu-latest
     steps:
@@ -108,32 +116,62 @@ jobs:
         env:
           IMAGE_TAG: ${{ needs.determine-environment.outputs.image_tag }}
           BRANCH: ${{ needs.determine-environment.outputs.branch }}
+          ARGOCD_APP: ${{ needs.determine-environment.outputs.argocd_app }}
         run: |
           sed -i "s|image: .*/worklog-backend:.*|image: ${{ secrets.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}:${IMAGE_TAG}|" deploy_manifest/worklog-backend.yaml
           sed -i "s|value: .* # IMAGE_TAG|value: \"${IMAGE_TAG}\" # IMAGE_TAG|" deploy_manifest/worklog-backend.yaml
           git config user.name "github-actions"
           git config user.email "actions@github.com"
           git add deploy_manifest/worklog-backend.yaml
-          git diff --staged --quiet || git commit -m "deploy(${{ needs.determine-environment.outputs.environment }}): update backend image to ${IMAGE_TAG}"
+          git diff --staged --quiet || git commit -m "deploy(${{ needs.determine-environment.outputs.environment }}): update backend image to ${IMAGE_TAG} (${ARGOCD_APP})"
           git pull --rebase -X theirs origin "$BRANCH"
           git push origin "HEAD:$BRANCH"
 
   notify:
-    needs: [determine-environment, test, build, deploy]
+    needs: [determine-environment, test, build, update-manifest]
     if: always()
     runs-on: ubuntu-latest
+    env:
+      ENVIRONMENT: ${{ needs.determine-environment.outputs.environment }}
+      ARGOCD_APP: ${{ needs.determine-environment.outputs.argocd_app }}
+      IMAGE_TAG: ${{ needs.determine-environment.outputs.image_tag }}
+      BRANCH: ${{ needs.determine-environment.outputs.branch }}
+      # 커밋 메시지는 run에 바로 넣지 않고 env로 넘긴다. push는 커밋 메시지, PR은 PR 제목
+      COMMIT_MSG: ${{ github.event.head_commit.message || github.event.pull_request.title }}
     steps:
-      - name: Report result
+      - name: Notify success
+        if: needs.test.result == 'success' && needs.build.result == 'success' && needs.update-manifest.result == 'success'
         run: |
           {
-            echo "### Backend multi-env pipeline"
+            echo "### Backend multi-env pipeline: success"
+            echo ""
+            echo "Argo CD \`${ARGOCD_APP}\` will deploy \`${IMAGE_TAG}\` to \`${ENVIRONMENT}\` by automated sync."
             echo ""
             echo "| item | value |"
             echo "|---|---|"
-            echo "| environment | ${{ needs.determine-environment.outputs.environment }} |"
-            echo "| image_tag | ${{ needs.determine-environment.outputs.image_tag }} |"
-            echo "| branch | ${{ needs.determine-environment.outputs.branch }} |"
+            echo "| environment | ${ENVIRONMENT} |"
+            echo "| argocd_app | ${ARGOCD_APP} |"
+            echo "| image_tag | ${IMAGE_TAG} |"
+            echo "| branch | ${BRANCH} |"
+            echo "| commit | $(printf '%s' "$COMMIT_MSG" | head -n 1) |"
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: Notify failure
+        if: ${{ !(needs.test.result == 'success' && needs.build.result == 'success' && needs.update-manifest.result == 'success') }}
+        run: |
+          {
+            echo "### Backend multi-env pipeline: failure"
+            echo ""
+            echo "| item | value |"
+            echo "|---|---|"
+            echo "| environment | ${ENVIRONMENT} |"
+            echo "| argocd_app | ${ARGOCD_APP} |"
+            echo "| image_tag | ${IMAGE_TAG} |"
+            echo "| branch | ${BRANCH} |"
+            echo "| commit | $(printf '%s' "$COMMIT_MSG" | head -n 1) |"
+            echo "| determine-environment | ${{ needs.determine-environment.result }} |"
             echo "| test | ${{ needs.test.result }} |"
             echo "| build | ${{ needs.build.result }} |"
-            echo "| deploy | ${{ needs.deploy.result }} |"
+            echo "| update-manifest | ${{ needs.update-manifest.result }} |"
           } | tee -a "$GITHUB_STEP_SUMMARY"
+          exit 1
