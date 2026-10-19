@@ -103,6 +103,18 @@ pipeline {
                 """
             }
         }
+        // Build가 push한 이미지를 검사한다. CRITICAL이나 HIGH가 있으면 실패하고 Update Manifest는 건너뛴다.
+        stage('Scan') {
+            when { expression { env.SKIP_BUILD != 'true' } }
+            steps {
+                sh """
+                    curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/v0.75.0/contrib/install.sh | sh -s -- -b /tmp v0.75.0
+                    TRIVY_USERNAME="\$DOCKERHUB_CREDENTIALS_USR" TRIVY_PASSWORD="\$DOCKERHUB_CREDENTIALS_PSW" \\
+                        /tmp/trivy image --exit-code 1 --severity CRITICAL,HIGH --ignore-unfixed --format table \\
+                        "\$DOCKERHUB_CREDENTIALS_USR/${IMAGE_NAME}:${env.IMAGE_TAG}"
+                """
+            }
+        }
         stage('Update Manifest') {
             when { expression { env.SKIP_BUILD != 'true' } }
             steps {
