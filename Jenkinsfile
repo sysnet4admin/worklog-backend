@@ -10,7 +10,8 @@ def sendSlackMessage(statusMessage, commitMessage, shortSHA, fullSHA) {
 }
 
 pipeline {
-    agent any
+    // 컨트롤러에는 uv와 docker가 없다. 4.5의 podTemplate으로 뜨는 쿠버네티스 에이전트에서 실행한다.
+    agent { label 'jenkins-jenkins-agent' }
     stages {
         stage('Init Variables') {
             steps {
@@ -23,9 +24,15 @@ pipeline {
             }
         }
         stage('Run Test') {
+            // 에이전트 Pod에 uv를 설치하고 테스트 환경만 준비한다. pytest 실행은 6.8부터.
             steps {
                 echo "let's run a test for ${shortSHA} in ${branch}"
                 echo "running test for ${fullSHA}"
+                sh '''
+                    curl -LsSf https://astral.sh/uv/0.11.18/install.sh | sh
+                    export PATH=$HOME/.local/bin:$PATH
+                    uv sync --extra dev
+                '''
                 echo 'Test Passed!'
             }
         }
@@ -35,12 +42,6 @@ pipeline {
                 echo "The change commit message to build is '${commitMessage}'"
                 echo 'build successful and published image with the following tags:'
                 echo "Tags: ${shortSHA}, ${fullSHA}"
-            }
-        }
-        stage('Deploy Image') {
-            steps {
-                echo "Let's deploy the image"
-                echo "Deploying our image ${fullSHA} to the cluster"
             }
         }
     }
