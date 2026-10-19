@@ -10,6 +10,7 @@ COPY ./src/worklog /app/worklog
 COPY --from=uv_builder /requirements.txt /tmp/requirements.txt
 
 RUN pip install --no-cache-dir -r /tmp/requirements.txt
+RUN pip uninstall -y pip setuptools && rm -rf /usr/local/lib/python3.14/ensurepip
 
 ENTRYPOINT ["fastapi"]
 CMD ["run", "main.py", "--port", "80"]
